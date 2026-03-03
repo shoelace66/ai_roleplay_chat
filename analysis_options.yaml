@@ -1,0 +1,6 @@
+﻿include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # Demo 阶段允许打印日志，方便观察请求和状态流转。
+    avoid_print: false
