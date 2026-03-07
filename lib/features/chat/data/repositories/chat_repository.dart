@@ -5,6 +5,11 @@ import '../models/message.dart';
 class ChatRepository {
   ChatRepository({required AiService aiService}) : _aiService = aiService;
 
+  /// AI 服务实例
+  ///
+  /// 用于直接调用 LLM，如自然语言转 JSON 等功能
+  AiService get aiService => _aiService;
+
   static const String _outputSchema = '''
 {
   "reply": "给用户的回复",

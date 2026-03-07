@@ -59,20 +59,27 @@ class ChatProvider extends ChangeNotifier {
   /// 短期事件队列最大容量
   ///
   /// 超过此容量时，最旧的事件会被移除
-  static const int _maxShortQueue = 120;
+  /// 限制为 2000 以防止本地存储过大
+  static const int _maxShortQueue = 2000;
 
   /// 长期事件队列最大容量
-  static const int _maxLongQueue = 60;
+  ///
+  /// 前5条固定输入LLM，其余应用LRU排序
+  /// 限制为 500 以平衡存储和性能
+  static const int _maxLongQueue = 500;
 
   /// 超长期事件队列最大容量
-  static const int _maxUltraQueue = 30;
+  ///
+  /// 前2条固定输入LLM，其余应用LRU排序
+  /// 限制为 200 以平衡存储和性能
+  static const int _maxUltraQueue = 200;
 
   /// 关键词提取正则表达式
   ///
   /// 匹配中文字符、英文字母、数字和下划线，最少2个字符
   /// 用于从用户输入中提取本地关键词
   static final RegExp _keywordTokenReg =
-      RegExp(r'[\u4e00-\u9fffA-Za-z0-9_]{2,}');
+      RegExp(r'[\u4e00-\u9fffA-Za-z0-9_]{2,4}');
 
   /// 调试模式输出Schema
   ///
@@ -281,7 +288,9 @@ class ChatProvider extends ChangeNotifier {
     required String avatar,
     List<String> personality = const <String>[],
     List<String> appearance = const <String>[],
+    List<Map<String, dynamic>> settings = const <Map<String, dynamic>>[],
     List<String> backgroundStory = const <String>[],
+    ContactCategory category = ContactCategory.contact,
   }) async {
     final normalizedName = name.trim();
     final normalizedId = contactId.trim();
@@ -294,7 +303,9 @@ class ChatProvider extends ChangeNotifier {
       avatar: avatar.trim(),
       personality: personality,
       appearance: appearance,
+      settings: settings,
       backgroundStory: backgroundStory,
+      category: category,
       createdAt: DateTime.now(),
     );
     _contacts.add(contact);
@@ -304,6 +315,212 @@ class ChatProvider extends ChangeNotifier {
     await _agentStore.saveMessagesByContact(_messagesByContact);
     notifyListeners();
     return true;
+  }
+
+  /// 从 JSON 创建联系人
+  ///
+  /// JSON 格式示例：
+  /// ```json
+  /// {
+  ///   "id": "character-001",
+  ///   "name": "阿星",
+  ///   "avatar": "⭐",
+  ///   "personality": ["直接", "理性", "冷静"],
+  ///   "appearance": ["黑色外套", "短发", "眼神锐利"],
+  ///   "backgroundStory": ["与用户共同调查旧城区谜案", "曾是警校优秀毕业生"],
+  ///   "worldKnowledge": ["旧城区夜里常停电", "城市地下有废弃隧道"],
+  ///   "selfKnowledge": ["擅长记录线索", "有轻微的强迫症"],
+  ///   "userKnowledge": ["用户喜欢先看证据再下结论"],
+  ///   "belongings": ["手电筒", "笔记本", "放大镜"],
+  ///   "status": ["健康", "精神状态良好"],
+  ///   "mood": "专注",
+  ///   "time": "晚上8点"
+  /// }
+  /// ```
+  ///
+  /// 返回是否创建成功（失败原因：ID已存在、参数无效或JSON解析失败）
+  Future<bool> addContactFromJson(
+    String jsonString, {
+    ContactCategory category = ContactCategory.contact,
+  }) async {
+    try {
+      final json = jsonDecode(jsonString) as Map<String, dynamic>;
+
+      final id = (json['id'] ?? '').toString().trim();
+      final name = (json['name'] ?? '').toString().trim();
+
+      if (id.isEmpty || name.isEmpty) return false;
+      if (_contacts.any((e) => e.id == id)) return false;
+
+      final contact = Contact(
+        id: id,
+        name: name,
+        avatar: (json['avatar'] ?? '').toString(),
+        personality: _extractStrings(json['personality']),
+        appearance: _extractStrings(json['appearance']),
+        settings: _extractSettings(json['settings']),
+        backgroundStory: _extractStrings(json['backgroundStory']),
+        worldKnowledge: WorldKnowledgeBucket(
+          _extractStrings(json['worldKnowledge']),
+        ),
+        selfKnowledge: SelfKnowledgeBucket(
+          _extractStrings(json['selfKnowledge']),
+        ),
+        userKnowledge: UserKnowledgeBucket(
+          _extractStrings(json['userKnowledge']),
+        ),
+        belongings: _extractStrings(json['belongings']),
+        status: _extractStrings(json['status']),
+        mood: (json['mood'] ?? '').toString(),
+        time: (json['time'] ?? '').toString(),
+        category: category,
+        createdAt: DateTime.now(),
+      );
+
+      _contacts.add(contact);
+      _messagesByContact.putIfAbsent(contact.id, () => <Message>[]);
+      _selectedContactId = contact.id;
+      await _agentStore.saveContacts(_contacts);
+      await _agentStore.saveMessagesByContact(_messagesByContact);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('addContactFromJson failed: $e');
+      return false;
+    }
+  }
+
+  /// 删除联系人
+  ///
+  /// 删除指定 ID 的联系人及其所有消息记录
+  /// 如果删除的是当前选中的联系人，会自动切换到其他联系人或清空选择
+  /// 返回是否删除成功（失败原因：联系人不存在）
+  Future<bool> deleteContact(String contactId) async {
+    final index = _contacts.indexWhere((c) => c.id == contactId);
+    if (index == -1) return false;
+
+    // 从列表中移除
+    _contacts.removeAt(index);
+
+    // 删除关联的消息记录
+    _messagesByContact.remove(contactId);
+
+    // 如果删除的是当前选中的联系人，更新选中状态
+    if (_selectedContactId == contactId) {
+      if (_contacts.isNotEmpty) {
+        _selectedContactId = _contacts.first.id;
+      } else {
+        _selectedContactId = null;
+      }
+    }
+
+    // 持久化更新
+    await _agentStore.saveContacts(_contacts);
+    await _agentStore.saveMessagesByContact(_messagesByContact);
+
+    notifyListeners();
+    return true;
+  }
+
+  /// 将自然语言描述转换为角色 JSON
+  ///
+  /// 使用 LLM 将用户的自然语言描述转换为标准的角色 JSON 格式
+  /// 如果转换失败，返回 null
+  ///
+  /// [naturalLanguage] 自然语言描述，例如：
+  /// "创建一个名叫阿星的侦探，性格理性冷静，穿着黑色外套，
+  ///  擅长记录线索，正在调查旧城区的谜案"
+  Future<String?> convertNaturalLanguageToJson(String naturalLanguage) async {
+    if (naturalLanguage.trim().isEmpty) return null;
+
+    const systemPrompt = '''你是一个角色创建助手。请将用户的自然语言描述转换为标准的 JSON 格式。
+
+必须包含的字段：
+- id: 使用小写字母、数字和连字符，如 "character-001"
+- name: 角色名称
+
+可选字段（根据描述提取，没有则留空或空数组）：
+- avatar: 一个 emoji 或简短符号作为头像
+- personality: 性格特点数组，如 ["理性", "冷静"]
+- appearance: 外貌特征数组，如 ["黑色外套", "短发"]
+- backgroundStory: 背景故事数组
+- worldKnowledge: 世界观知识数组
+- selfKnowledge: 自我认知数组
+- userKnowledge: 对用户的了解数组
+- belongings: 物品持有数组
+- status: 身体状态数组
+- mood: 当前情绪
+- time: 当前时间
+
+输出要求：
+1. 只输出纯 JSON，不要包含任何解释文字
+2. 确保 JSON 格式正确，可以被解析
+3. 如果描述中缺少某些信息，使用空字符串或空数组
+4. id 必须唯一且有效，name 不能为空
+
+示例输出：
+{"id":"detective-001","name":"阿星","avatar":"🕵️","personality":["理性","冷静"],"appearance":["黑色外套","短发"],"backgroundStory":["资深侦探","破获多起大案"],"worldKnowledge":[],"selfKnowledge":["擅长推理"],"userKnowledge":[],"belongings":["放大镜","笔记本"],"status":["健康"],"mood":"专注","time":""}
+''';
+
+    try {
+      // 使用 AI 服务进行转换
+      final response = await _repository.aiService.ask(
+        '$systemPrompt\n\n用户描述：\n$naturalLanguage',
+        contactId: 'system-nlp-to-json',
+        contactName: 'System',
+      );
+
+      // 尝试从响应中提取 JSON
+      final jsonStr = _extractJsonFromResponse(response);
+      if (jsonStr == null || jsonStr.isEmpty) {
+        debugPrint('Failed to extract JSON from LLM response');
+        return null;
+      }
+
+      // 验证 JSON 是否有效
+      final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final id = (json['id'] ?? '').toString().trim();
+      final name = (json['name'] ?? '').toString().trim();
+
+      if (id.isEmpty || name.isEmpty) {
+        debugPrint('LLM generated JSON missing required fields (id/name)');
+        return null;
+      }
+
+      return jsonStr;
+    } catch (e) {
+      debugPrint('convertNaturalLanguageToJson failed: $e');
+      return null;
+    }
+  }
+
+  /// 从 LLM 响应中提取 JSON 字符串
+  String? _extractJsonFromResponse(String response) {
+    // 尝试直接解析整个响应
+    final trimmed = response.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      return trimmed;
+    }
+
+    // 尝试从代码块中提取
+    final codeBlockReg =
+        RegExp(r'```(?:json)?\s*([\s\S]*?)\s*```', caseSensitive: false);
+    final codeMatch = codeBlockReg.firstMatch(response);
+    if (codeMatch != null) {
+      final content = codeMatch.group(1)?.trim() ?? '';
+      if (content.startsWith('{') && content.endsWith('}')) {
+        return content;
+      }
+    }
+
+    // 尝试找到第一个 { 和最后一个 }
+    final startIndex = response.indexOf('{');
+    final endIndex = response.lastIndexOf('}');
+    if (startIndex != -1 && endIndex != -1 && startIndex < endIndex) {
+      return response.substring(startIndex, endIndex + 1);
+    }
+
+    return null;
   }
 
   // ==================== 消息发送核心流程 ====================
@@ -434,7 +651,11 @@ class ChatProvider extends ChangeNotifier {
       await _agentStore.saveMessagesByContact(_messagesByContact);
 
       // 步骤7: 更新联系人记忆
-      await _updateContactFromMemoryPatch(selected, reply.content);
+      await _updateContactFromMemoryPatch(
+        selected,
+        reply.content,
+        userInput: input,
+      );
     } on AiServiceException catch (e) {
       error = e.userMessage;
       _heartbeat.markReconnecting();
@@ -459,13 +680,15 @@ class ChatProvider extends ChangeNotifier {
   /// 1. 解析memoryPatch JSON
   /// 2. 提取各类知识、事件、物品、状态
   /// 3. 将新事件加入短期队列
-  /// 4. 更新物品关联和边关系
-  /// 5. 触发事件总结（如达到阈值）
-  /// 6. 持久化更新后的联系人
+  /// 4. 对本地存储的事件（第11个及以后）应用LRU排序
+  /// 5. 更新物品关联和边关系
+  /// 6. 触发事件总结（如达到阈值）
+  /// 7. 持久化更新后的联系人
   Future<void> _updateContactFromMemoryPatch(
     Contact contact,
-    String response,
-  ) async {
+    String response, {
+    required String userInput,
+  }) async {
     final patch = StructuredOutputRegexParser.extractMemoryPatch(response);
     if (patch == null) return;
 
@@ -507,6 +730,10 @@ class ChatProvider extends ChangeNotifier {
           ? graph.shortTermQueue.first.id
           : null;
     }
+
+    // 对所有事件队列应用LRU排序（仅本地存储部分）
+    // 各层级固定输入LLM的事件不参与LRU排序
+    graph = _applyLruToAllQueues(graph, userInput: userInput);
 
     // 更新物品关联和边关系
     graph = _applyBelongingQueuesAndEdges(
@@ -661,7 +888,8 @@ class ChatProvider extends ChangeNotifier {
   ) {
     final b = StringBuffer();
     b.writeln('你是事件归并器。');
-    b.writeln('任务：将以下${_tierLabel(source)}事件归并为 1 条${_tierLabel(target)}事件。');
+    b.writeln(
+        '任务：将以下${_tierLabel(source)}事件归并且简写为 1 条${_tierLabel(target)}事件。');
     b.writeln(
       '只输出 JSON。格式：{"n":10,"event":{"time":"","location":"","characters":"","cause":"","process":"","result":"","attitude":""}}',
     );
@@ -743,24 +971,45 @@ class ChatProvider extends ChangeNotifier {
   /// 构建用于Prompt的联系人对象
   ///
   /// 从完整联系人中提取用于LLM输入的子集：
-  /// - 事件：短期10条 + 长期5条 + 超长期2条 + 关联5条
-  /// - 知识：各类型前5条
+  /// - 短期：前10条固定输入LLM（第11条及以后LRU排序存储）
+  /// - 长期：前5条固定输入LLM（第6条及以后LRU排序存储）
+  /// - 超长期：前2条固定输入LLM（第3条及以后LRU排序存储）
+  /// - 关联事件：5条
+  /// - 知识：各类型前5条（新增的知识优先）
   /// - 物品：前5个
   Contact? _buildPromptContact(Contact? contact, {required String userInput}) {
     if (contact == null) return null;
-    final memoryEvents = <EventMemory>[
-      ...contact.eventGraph.shortTermQueue
-          .where((e) => !e.summarized)
-          .take(10)
-          .map((e) => e.event),
-      ...contact.eventGraph.longTermQueue
-          .where((e) => !e.summarized)
-          .take(5)
-          .map((e) => e.event),
-      ...contact.eventGraph.ultraLongTermQueue.take(2).map((e) => e.event),
+
+    // 获取各层级事件队列（已按LRU排序存储在本地）
+    final shortQueue = contact.eventGraph.shortTermQueue;
+    final longQueue = contact.eventGraph.longTermQueue;
+    final ultraQueue = contact.eventGraph.ultraLongTermQueue;
+
+    // 前N条固定输入LLM（保持时间顺序，最新的在前）
+    final llmEvents = <EventMemory>[
+      ...shortQueue.where((e) => !e.summarized).take(10).map((e) => e.event),
+      ...longQueue.where((e) => !e.summarized).take(5).map((e) => e.event),
+      ...ultraQueue.take(2).map((e) => e.event),
     ];
+
     final related =
         contact.eventGraph.relatedEventsForPrompt(userInput).take(5);
+
+    // 知识处理：取后5条（新增的）+ 前5条（旧的），去重后取前5条
+    // 这样确保新增的知识优先输入到LLM
+    final worldKnowledge = _mergeKnowledgePriority(
+      contact.worldKnowledge.items,
+      maxCount: 5,
+    );
+    final selfKnowledge = _mergeKnowledgePriority(
+      contact.selfKnowledge.items,
+      maxCount: 5,
+    );
+    final userKnowledge = _mergeKnowledgePriority(
+      contact.userKnowledge.items,
+      maxCount: 5,
+    );
+
     return Contact(
       id: contact.id,
       name: contact.name,
@@ -769,14 +1018,11 @@ class ChatProvider extends ChangeNotifier {
       personality: contact.personality,
       appearance: contact.appearance,
       backgroundStory: contact.backgroundStory,
-      worldKnowledge:
-          WorldKnowledgeBucket(_firstN(contact.worldKnowledge.items, 5)),
-      selfKnowledge:
-          SelfKnowledgeBucket(_firstN(contact.selfKnowledge.items, 5)),
-      userKnowledge:
-          UserKnowledgeBucket(_firstN(contact.userKnowledge.items, 5)),
+      worldKnowledge: WorldKnowledgeBucket(worldKnowledge),
+      selfKnowledge: SelfKnowledgeBucket(selfKnowledge),
+      userKnowledge: UserKnowledgeBucket(userKnowledge),
       events: EventLruBucket(
-          _dedupeEvents(<EventMemory>[...memoryEvents, ...related])),
+          _dedupeEvents(<EventMemory>[...llmEvents, ...related])),
       eventGraph: contact.eventGraph,
       belongings: _firstN(contact.belongings, 5),
       status: contact.status,
@@ -784,6 +1030,222 @@ class ChatProvider extends ChangeNotifier {
       time: contact.time,
       createdAt: contact.createdAt,
     );
+  }
+
+  /// 合并知识列表，优先保留新增的知识（列表末尾）
+  ///
+  /// 策略：取列表末尾的maxCount个（新增的）+ 列表开头的maxCount个（旧的）
+  /// 合并后去重，保留顺序，最终取前maxCount个
+  List<String> _mergeKnowledgePriority(List<String> items,
+      {required int maxCount}) {
+    if (items.length <= maxCount) return List<String>.from(items);
+
+    // 取新增的（末尾）和旧的（开头）
+    final recent = items.sublist(items.length - maxCount);
+    final old = items.sublist(0, maxCount);
+
+    // 合并并去重，保持新增优先
+    final result = <String>[];
+    final seen = <String>{};
+
+    // 先加新增的（优先级高）
+    for (final item in recent.reversed) {
+      if (seen.add(item)) result.add(item);
+    }
+
+    // 再加旧的
+    for (final item in old) {
+      if (seen.add(item)) result.add(item);
+    }
+
+    // 返回前maxCount个（顺序是：最新的在前）
+    return result.sublist(
+        0, maxCount < result.length ? maxCount : result.length);
+  }
+
+  /// 对所有事件队列应用LRU排序（仅用于本地存储优化）
+  ///
+  /// 各层级固定输入LLM的数量：
+  /// - 短期：前10个固定，第11个及以后LRU排序
+  /// - 长期：前5个固定，第6个及以后LRU排序
+  /// - 超长期：前2个固定，第3个及以后LRU排序
+  ///
+  /// LRU排序规则：
+  /// 1. 与当前用户输入关键词匹配的事件（权重100）
+  /// 2. 与关键词匹配事件有event-event关联的（权重50）
+  /// 3. 与关键词相关belonging有event-belonging关联的（权重30）
+  /// 4. 普通event-belonging关联的（权重10）
+  /// 5. 其他事件按时间倒序（新的在前）
+  EventGraphMemory _applyLruToAllQueues(
+    EventGraphMemory graph, {
+    required String userInput,
+  }) {
+    // 各层级固定输入LLM的数量
+    const shortFixed = 10;
+    const longFixed = 5;
+    const ultraFixed = 2;
+
+    var result = graph;
+
+    // 对短期队列应用LRU
+    result = _applyLruToQueue(
+      result,
+      tier: EventTier.shortTerm,
+      fixedCount: shortFixed,
+      userInput: userInput,
+    );
+
+    // 对长期队列应用LRU
+    result = _applyLruToQueue(
+      result,
+      tier: EventTier.longTerm,
+      fixedCount: longFixed,
+      userInput: userInput,
+    );
+
+    // 对超长期队列应用LRU
+    result = _applyLruToQueue(
+      result,
+      tier: EventTier.ultraLongTerm,
+      fixedCount: ultraFixed,
+      userInput: userInput,
+    );
+
+    return result;
+  }
+
+  /// 对指定层级的事件队列应用LRU排序
+  ///
+  /// [fixedCount] 固定输入LLM的事件数量，不参与LRU排序
+  EventGraphMemory _applyLruToQueue(
+    EventGraphMemory graph, {
+    required EventTier tier,
+    required int fixedCount,
+    required String userInput,
+  }) {
+    List<EventNode> getQueue() {
+      switch (tier) {
+        case EventTier.shortTerm:
+          return graph.shortTermQueue;
+        case EventTier.longTerm:
+          return graph.longTermQueue;
+        case EventTier.ultraLongTerm:
+          return graph.ultraLongTermQueue;
+      }
+    }
+
+    final queue = getQueue();
+    if (queue.length <= fixedCount) return graph; // 不足固定数量不需要LRU排序
+
+    // 前fixedCount个保持原顺序（时间倒序，最新的在前）
+    final fixedEvents = queue.take(fixedCount).toList();
+
+    // 剩余事件应用LRU排序
+    final remaining = queue.skip(fixedCount).toList();
+    final sortedRemaining = _sortEventsByLruScore(
+      remaining,
+      graph: graph,
+      userInput: userInput,
+    );
+
+    // 合并队列：固定部分 + LRU排序部分
+    final newQueue = <EventNode>[...fixedEvents, ...sortedRemaining];
+
+    switch (tier) {
+      case EventTier.shortTerm:
+        return graph.copyWith(shortTermQueue: newQueue);
+      case EventTier.longTerm:
+        return graph.copyWith(longTermQueue: newQueue);
+      case EventTier.ultraLongTerm:
+        return graph.copyWith(ultraLongTermQueue: newQueue);
+    }
+  }
+
+  /// 对事件列表按LRU分数排序
+  List<EventNode> _sortEventsByLruScore(
+    List<EventNode> events, {
+    required EventGraphMemory graph,
+    required String userInput,
+  }) {
+    if (events.isEmpty) return events;
+
+    // 提取用户输入关键词
+    final keywords = _extractLocalKeywords(userInput).toSet();
+
+    // 构建节点ID到节点的映射（包含所有事件，用于查找关联）
+    final allNodes = <String, EventNode>{
+      for (final node in graph.shortTermQueue) node.id: node,
+      for (final node in graph.longTermQueue) node.id: node,
+      for (final node in graph.ultraLongTermQueue) node.id: node,
+    };
+
+    // 构建邻接表（event-event边）
+    final adjacent = <String, Set<String>>{};
+    for (final edge in graph.edges) {
+      if (allNodes.containsKey(edge.fromNodeId) &&
+          allNodes.containsKey(edge.toNodeId)) {
+        adjacent
+            .putIfAbsent(edge.fromNodeId, () => <String>{})
+            .add(edge.toNodeId);
+        adjacent
+            .putIfAbsent(edge.toNodeId, () => <String>{})
+            .add(edge.fromNodeId);
+      }
+    }
+
+    // 计算每个节点的LRU分数
+    final scores = <String, int>{};
+    for (final node in events) {
+      var score = 0;
+
+      // 1. 检查是否与用户输入关键词匹配
+      final nodeKeywords =
+          _extractLocalKeywords(node.event.toSearchableText()).toSet();
+      final keywordMatches = keywords.intersection(nodeKeywords).length;
+      score += keywordMatches * 100;
+
+      // 2. 检查是否有event-event关联（与被关键词匹配的事件相连）
+      final neighbors = adjacent[node.id] ?? const <String>{};
+      for (final neighborId in neighbors) {
+        final neighbor = allNodes[neighborId];
+        if (neighbor == null) continue;
+        final neighborKeywords =
+            _extractLocalKeywords(neighbor.event.toSearchableText()).toSet();
+        if (keywords.intersection(neighborKeywords).isNotEmpty) {
+          score += 50;
+          break;
+        }
+      }
+
+      // 3. 检查是否有event-belonging关联
+      for (final entry in graph.belongingEventQueues.entries) {
+        final queue = entry.value;
+        if (queue.contains(node.id)) {
+          final belongingKeywords = _extractLocalKeywords(entry.key).toSet();
+          if (keywords.intersection(belongingKeywords).isNotEmpty) {
+            score += 30;
+          } else {
+            score += 10;
+          }
+          break;
+        }
+      }
+
+      scores[node.id] = score;
+    }
+
+    // 按分数降序排序，分数相同的按时间倒序（新的在前）
+    final sorted = List<EventNode>.from(events);
+    sorted.sort((a, b) {
+      final scoreA = scores[a.id] ?? 0;
+      final scoreB = scores[b.id] ?? 0;
+      if (scoreA != scoreB) {
+        return scoreB.compareTo(scoreA);
+      }
+      return b.createdAtMs.compareTo(a.createdAtMs);
+    });
+
+    return sorted;
   }
 
   /// 提取本轮对话关键词
@@ -1063,6 +1525,25 @@ class ChatProvider extends ChangeNotifier {
         .map((e) => e?.toString().trim() ?? '')
         .where((e) => e.isNotEmpty)
         .toList();
+  }
+
+  List<Map<String, dynamic>> _extractSettings(dynamic value) {
+    if (value is! List) return const <Map<String, dynamic>>[];
+    final out = <Map<String, dynamic>>[];
+    for (final item in value) {
+      if (item is! Map) continue;
+      final map = item as Map<String, dynamic>;
+      final key = (map['key'] ?? '').toString().trim();
+      final value = (map['value'] ?? '').toString().trim();
+      if (key.isEmpty || value.isEmpty) continue;
+      final relate = _extractStrings(map['relate']);
+      out.add({
+        'key': key,
+        'value': value,
+        'relate': relate,
+      });
+    }
+    return out;
   }
 
   /// 从JSON中提取字符串

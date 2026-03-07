@@ -2,14 +2,15 @@ import '../../data/models/contact.dart';
 
 class StructuredInputPromptComposer {
   static const int _maxPromptListItems = 5;
-  static const int _maxPromptLineLength = 120;
+  static const int _maxPromptLineLength = 200;
   static const int _maxEdgeLines = 20;
 
-  static String _buildGuardrail() {
+  static String _buildGuardrail({bool isStory = false}) {
+    final typeLabel = isStory ? '故事' : '角色';
     return '''
 【输出格式】必须输出合法 JSON，且仅包含以下结构：
 {
-  "reply": "角色回复内容，符合人设",
+  "reply": "$typeLabel回复内容，符合设定",
   "memoryPatch": {
     "worldKnowledge": ["新增的世界观知识，无则[]"],
     "selfKnowledge": ["新增的自我认知，无则[]"],
@@ -23,8 +24,8 @@ class StructuredInputPromptComposer {
 }
 
 规则：
-- 完全沉浸角色，不跳出人设
-- 基于“当前状态”中的情绪、时间、事件调整语气
+- 完全沉浸${isStory ? '故事叙事者' : '角色'}，不跳出设定
+- 基于"当前状态"中的情绪、时间、事件调整语气
 - 可主动提及物品、背景故事、联想事件
 - belongings 必须使用 "(新增)物品名" 或 "(提及)物品名" 格式
 - 不要输出 Markdown 代码块
@@ -33,17 +34,40 @@ class StructuredInputPromptComposer {
 
   static String _buildRoleplayPrompt(Contact contact) {
     final buffer = StringBuffer();
+    final isStory = contact.category == ContactCategory.story;
 
     buffer.writeln('## 基础信息');
-    buffer.writeln(' - 姓名: ${contact.name}');
+    if (isStory) {
+      buffer.writeln(' - 故事名称: ${contact.name}');
+    } else {
+      buffer.writeln(' - 姓名: ${contact.name}');
+    }
     if (contact.avatar.isNotEmpty) {
       buffer.writeln(' - 头像: ${contact.avatar}');
     }
     buffer.writeln();
 
-    buffer.writeln('## 角色设定');
-    _writeStringList(buffer, '外貌特征', contact.appearance);
-    _writeStringList(buffer, '性格特点', contact.personality);
+    buffer.writeln(isStory ? '## 故事设定' : '## 角色设定');
+    if (isStory) {
+      _writeStringList(buffer, '风格', contact.personality);
+      if (contact.settings.isNotEmpty) {
+        buffer.writeln('### 设定');
+        for (final setting in contact.settings) {
+          final key = setting['key'] as String? ?? '';
+          final value = setting['value'] as String? ?? '';
+          final relate = setting['relate'] as List<String>? ?? [];
+          if (key.isEmpty || value.isEmpty) continue;
+          buffer.writeln(' - $key: $value');
+          if (relate.isNotEmpty) {
+            buffer.writeln('   关联: ${relate.join(' ')}');
+          }
+        }
+        buffer.writeln();
+      }
+    } else {
+      _writeStringList(buffer, '外貌特征', contact.appearance);
+      _writeStringList(buffer, '性格特点', contact.personality);
+    }
     _writeStringList(buffer, '背景故事', contact.backgroundStory);
 
     buffer.writeln('## 知识储备');
@@ -238,7 +262,8 @@ class StructuredInputPromptComposer {
     required Contact contact,
   }) {
     final base = basePrompt.trim();
-    final guardrail = _buildGuardrail();
+    final isStory = contact.category == ContactCategory.story;
+    final guardrail = _buildGuardrail(isStory: isStory);
     final profile = _buildRoleplayPrompt(contact);
     if (base.isEmpty) return '$guardrail\n\n$profile';
     return '$base\n\n$guardrail\n\n$profile';

@@ -493,6 +493,7 @@ class Contact {
     this.category = ContactCategory.contact,
     this.personality = const <String>[],
     this.appearance = const <String>[],
+    this.settings = const <Map<String, dynamic>>[],
     this.backgroundStory = const <String>[],
     this.worldKnowledge = const WorldKnowledgeBucket.empty(),
     this.selfKnowledge = const SelfKnowledgeBucket.empty(),
@@ -512,6 +513,7 @@ class Contact {
   final ContactCategory category;
   final List<String> personality;
   final List<String> appearance;
+  final List<Map<String, dynamic>> settings;
   final List<String> backgroundStory;
   final WorldKnowledgeBucket worldKnowledge;
   final SelfKnowledgeBucket selfKnowledge;
@@ -536,6 +538,7 @@ class Contact {
       category: _contactCategoryFromStorage(categoryText),
       personality: _readStringList(json['personality']),
       appearance: _readStringList(json['appearance']),
+      settings: _readSettingsList(json['settings']),
       backgroundStory: _readStringList(json['backgroundStory']),
       worldKnowledge:
           WorldKnowledgeBucket(_readStringList(json['worldKnowledge'])),
@@ -562,6 +565,7 @@ class Contact {
       'category': category.name,
       'personality': personality,
       'appearance': appearance,
+      'settings': settings,
       'backgroundStory': backgroundStory,
       'worldKnowledge': worldKnowledge.items,
       'selfKnowledge': selfKnowledge.items,
@@ -663,6 +667,25 @@ List<EventNode> _readEventNodeList(dynamic value) {
     final node = EventNode.fromJson(_asMap(item));
     if (node.id.trim().isEmpty) continue;
     out.add(node);
+  }
+  return out;
+}
+
+List<Map<String, dynamic>> _readSettingsList(dynamic value) {
+  if (value is! List) return const <Map<String, dynamic>>[];
+  final out = <Map<String, dynamic>>[];
+  for (final item in value) {
+    if (item is! Map) continue;
+    final map = _asMap(item);
+    final key = (map['key'] ?? '').toString().trim();
+    final value = (map['value'] ?? '').toString().trim();
+    if (key.isEmpty || value.isEmpty) continue;
+    final relate = _readStringList(map['relate']);
+    out.add({
+      'key': key,
+      'value': value,
+      'relate': relate,
+    });
   }
   return out;
 }
