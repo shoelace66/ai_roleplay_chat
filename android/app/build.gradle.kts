@@ -48,14 +48,14 @@ val flutterExpectedApkDir = rootProject.projectDir.resolve("../build/app/outputs
 
 val copyDebugApkForFlutter by tasks.registering(Copy::class) {
     dependsOn("assembleDebug")
-    from(layout.buildDirectory.file("outputs/flutter-apk/app-debug.apk"))
+    from(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
     from(layout.buildDirectory.file("outputs/apk/debug/output-metadata.json"))
     into(flutterExpectedApkDir)
 }
 
 val copyReleaseApkForFlutter by tasks.registering(Copy::class) {
     dependsOn("assembleRelease")
-    from(layout.buildDirectory.file("outputs/flutter-apk/app-release.apk"))
+    from(layout.buildDirectory.file("outputs/apk/release/app-release.apk"))
     from(layout.buildDirectory.file("outputs/apk/release/output-metadata.json"))
     into(flutterExpectedApkDir)
 }

@@ -8,12 +8,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:flutter_chat_demo/main.dart';
+import 'package:flutter_chat_demo/features/chat/presentation/pages/chat_page.dart';
 
 void main() {
   testWidgets('Chat app smoke test', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const ChatApp());
+    await tester.pumpWidget(const MaterialApp(home: ChatPage()));
 
     // Verify that our app title is present
     expect(find.text('Chat Demo'), findsOneWidget);
