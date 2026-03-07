@@ -145,6 +145,7 @@ class _ChatPageState extends State<ChatPage> {
       // 调用 LLM 转换
       final jsonStr = await _provider.convertNaturalLanguageToJson(
         result.naturalLanguage!,
+        isStory: result.category == ContactCategory.story,
       );
 
       if (!mounted) return;

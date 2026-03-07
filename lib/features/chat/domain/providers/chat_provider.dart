@@ -422,18 +422,45 @@ class ChatProvider extends ChangeNotifier {
     return true;
   }
 
-  /// 将自然语言描述转换为角色 JSON
+  /// 将自然语言描述转换为角色或故事 JSON
   ///
-  /// 使用 LLM 将用户的自然语言描述转换为标准的角色 JSON 格式
+  /// 使用 LLM 将用户的自然语言描述转换为标准的 JSON 格式
   /// 如果转换失败，返回 null
   ///
   /// [naturalLanguage] 自然语言描述，例如：
-  /// "创建一个名叫阿星的侦探，性格理性冷静，穿着黑色外套，
-  ///  擅长记录线索，正在调查旧城区的谜案"
-  Future<String?> convertNaturalLanguageToJson(String naturalLanguage) async {
+  /// 角色："创建一个名叫阿星的侦探，性格理性冷静，穿着黑色外套"
+  /// 故事："创建一个魔法世界的故事，包含魔法师、魔法石等元素"
+  /// [isStory] 是否为故事类型（true=故事，false=角色）
+  Future<String?> convertNaturalLanguageToJson(
+    String naturalLanguage, {
+    bool isStory = false,
+  }) async {
     if (naturalLanguage.trim().isEmpty) return null;
 
-    const systemPrompt = '''你是一个角色创建助手。请将用户的自然语言描述转换为标准的 JSON 格式。
+    final systemPrompt = isStory
+        ? '''你是一个故事创建助手。请将用户的自然语言描述转换为标准的 JSON 格式。
+
+必须包含的字段：
+- id: 使用小写字母、数字和连字符，如 "story-001"
+- name: 故事名称
+
+可选字段（根据描述提取，没有则留空或空数组）：
+- avatar: 一个 emoji 或简短符号作为头像
+- personality: 故事风格标签数组，如 ["奇幻", "冒险"]
+- backgroundStory: 背景概述数组
+- settings: 故事设定数组，每个设定包含 key（设定名称）和 value（设定描述），如 [{"key":"魔法","value":"基于魔法石的能量"},{"key":"魔法师","value":"能够激发魔法石的人"}]
+
+输出要求：
+1. 只输出纯 JSON，不要包含任何解释文字
+2. 确保 JSON 格式正确，可以被解析
+3. 如果描述中缺少某些信息，使用空字符串或空数组
+4. id 必须唯一且有效，name 不能为空
+5. settings 字段用于存储故事的 key-value 设定
+
+示例输出：
+{"id":"magic-world-001","name":"魔法大陆","avatar":"🏰","personality":["奇幻","冒险"],"backgroundStory":["一个充满魔法的世界","魔法石是能量的来源"],"settings":[{"key":"魔法","value":"这片大陆的魔法基于魔法石"},{"key":"魔法师","value":"能够激发魔法石能量的人"},{"key":"缇娜","value":"小有天赋的魔法师"}]}
+'''
+        : '''你是一个角色创建助手。请将用户的自然语言描述转换为标准的 JSON 格式。
 
 必须包含的字段：
 - id: 使用小写字母、数字和连字符，如 "character-001"

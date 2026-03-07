@@ -53,6 +53,11 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
   ContactCategory _category = ContactCategory.contact;
   _EditorMode _mode = _EditorMode.normal;
 
+  // 故事设定 key-value 编辑器相关
+  final TextEditingController _settingKeyCtrl = TextEditingController();
+  final TextEditingController _settingValueCtrl = TextEditingController();
+  final List<Map<String, String>> _storySettings = <Map<String, String>>[];
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -61,6 +66,8 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
     _personalityCtrl.dispose();
     _appearanceCtrl.dispose();
     _backgroundCtrl.dispose();
+    _settingKeyCtrl.dispose();
+    _settingValueCtrl.dispose();
     super.dispose();
   }
 
@@ -142,6 +149,129 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
                   label: Text(items[i]),
                   onPressed: () => _editItem(items, i),
                   onDeleted: () => setState(() => items.removeAt(i)),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  /// 构建故事设定的 key-value 编辑器
+  ///
+  /// 用于创建故事时输入设定条目，如：
+  /// - 魔法: 这片大陆的魔法基于魔法石
+  /// - 魔法师: 能够激发魔法石能量的人
+  Widget _buildKeyValueEditor() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('故事设定', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: TextField(
+                controller: _settingKeyCtrl,
+                decoration: const InputDecoration(
+                  hintText: '设定名称，如：魔法',
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 3,
+              child: TextField(
+                controller: _settingValueCtrl,
+                decoration: const InputDecoration(
+                  hintText: '设定描述',
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: () {
+                final key = _settingKeyCtrl.text.trim();
+                final value = _settingValueCtrl.text.trim();
+                if (key.isEmpty || value.isEmpty) return;
+                setState(() {
+                  _storySettings.add({'key': key, 'value': value});
+                  _settingKeyCtrl.clear();
+                  _settingValueCtrl.clear();
+                });
+              },
+              child: const Text('添加'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        if (_storySettings.isEmpty)
+          const Text('暂无设定条目', style: TextStyle(color: Colors.grey))
+        else
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (var i = 0; i < _storySettings.length; i++)
+                InputChip(
+                  label: Text('${_storySettings[i]['key']}'),
+                  tooltip: _storySettings[i]['value'],
+                  onPressed: () async {
+                    final keyCtrl = TextEditingController(
+                      text: _storySettings[i]['key'],
+                    );
+                    final valueCtrl = TextEditingController(
+                      text: _storySettings[i]['value'],
+                    );
+                    final result = await showDialog<Map<String, String>?>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('修改设定'),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextField(
+                              controller: keyCtrl,
+                              decoration: const InputDecoration(
+                                labelText: '设定名称',
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: valueCtrl,
+                              decoration: const InputDecoration(
+                                labelText: '设定描述',
+                              ),
+                              maxLines: 3,
+                            ),
+                          ],
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('取消'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.of(context).pop({
+                              'key': keyCtrl.text.trim(),
+                              'value': valueCtrl.text.trim(),
+                            }),
+                            child: const Text('保存'),
+                          ),
+                        ],
+                      ),
+                    );
+                    keyCtrl.dispose();
+                    valueCtrl.dispose();
+                    if (result != null &&
+                        result['key']!.isNotEmpty &&
+                        result['value']!.isNotEmpty) {
+                      setState(() => _storySettings[i] = result);
+                    }
+                  },
+                  onDeleted: () => setState(() => _storySettings.removeAt(i)),
                 ),
             ],
           ),
@@ -258,6 +388,11 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
             controller: _backgroundCtrl,
           ),
           const SizedBox(height: 16),
+          // 故事类型显示 key-value 设定编辑器
+          if (_category == ContactCategory.story) ...[
+            _buildKeyValueEditor(),
+            const SizedBox(height: 16),
+          ],
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -467,6 +602,14 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
       return;
     }
 
+    // 构建 settings 列表（故事类型时包含 key-value 设定）
+    final List<Map<String, dynamic>> settings =
+        _category == ContactCategory.story
+            ? _storySettings
+                .map((e) => {'key': e['key'], 'value': e['value']})
+                .toList()
+            : <Map<String, dynamic>>[];
+
     Navigator.of(context).pop(
       ContactDraft(
         name: name,
@@ -476,6 +619,7 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
         appearance: _category == ContactCategory.contact
             ? List<String>.from(_appearance)
             : null,
+        settings: settings,
         backgroundStory: List<String>.from(_backgroundStory),
         category: _category,
       ),
