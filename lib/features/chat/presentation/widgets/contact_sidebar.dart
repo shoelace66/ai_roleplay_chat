@@ -61,18 +61,19 @@ class ContactSidebar extends StatelessWidget {
       width: 220,
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('创建对象'),
-              ),
+          // 顶部标题栏
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '对象列表',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
             ),
           ),
           const Divider(height: 1),
+          // 联系人列表
           Expanded(
             child: contacts.isEmpty
                 ? const Center(
@@ -118,10 +119,24 @@ class ContactSidebar extends StatelessWidget {
                     },
                   ),
           ),
+          // 底部操作按钮区域
+          const Divider(height: 1),
+          // 创建对象按钮（移到最底部）
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onAdd,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('创建对象'),
+              ),
+            ),
+          ),
+          // 删除按钮（在创建按钮上方）
           if (showDeleteInFooter) ...[
-            const Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
               child: SizedBox(
                 width: double.infinity,
                 child: selected != null
@@ -143,6 +158,8 @@ class ContactSidebar extends StatelessWidget {
                       ),
               ),
             ),
+          ] else ...[
+            const SizedBox(height: 8),
           ],
         ],
       ),

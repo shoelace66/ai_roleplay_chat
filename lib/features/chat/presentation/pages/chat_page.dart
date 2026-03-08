@@ -338,10 +338,20 @@ class _ChatPageState extends State<ChatPage> {
           ),
         ),
         actions: [
+          // 移动端AppBar显示API配置和调试功能按钮
           IconButton(
-            onPressed: _openCreateContactDialog,
-            tooltip: '创建对象',
-            icon: const Icon(Icons.person_add_alt_1),
+            onPressed: _openApiSettingDialog,
+            tooltip: 'API 配置',
+            icon: const Icon(Icons.key_outlined),
+          ),
+          IconButton(
+            onPressed: _provider.toggleDebugMode,
+            tooltip: '切换调试模式',
+            icon: Icon(
+              _provider.isDebugMode
+                  ? Icons.bug_report
+                  : Icons.bug_report_outlined,
+            ),
           ),
         ],
       ),
