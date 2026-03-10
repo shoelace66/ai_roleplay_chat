@@ -1,18 +1,20 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../../constants/api_constants.dart';
-import '../../../../constants/app_strings.dart';
-import '../../data/agent.dart';
+import '../../../../core/constants/api_constants.dart';
+import '../../../../core/constants/app_strings.dart';
+import '../../../../core/data/models/app_settings.dart';
+import '../../../../core/utils/structured_input_prompt_composer.dart';
+import '../../../../core/utils/structured_output_regex_parser.dart';
+import '../../../../infrastructure/services/ai_service.dart';
+import '../../data/datasources/chat_local_storage.dart';
 import '../../data/models/contact.dart';
 import '../../data/models/message.dart';
 import '../../data/repositories/chat_repository.dart';
-import '../services/ai_service.dart';
 import '../services/heartbeat_manager.dart';
 import '../services/input_formatter.dart';
-import '../structured/structured_input_prompt_composer.dart';
-import '../structured/structured_output_regex_parser.dart';
 
 /// 聊天状态管理器
 ///
@@ -41,6 +43,8 @@ class ChatProvider extends ChangeNotifier {
         _heartbeat = heartbeat ?? HeartbeatManager(),
         _repository = repository ?? ChatRepository(aiService: AiService()),
         _agentStore = agentStore ?? ChatAgentStore() {
+    // 加载应用设置
+    _loadAppSettings();
     // 启动心跳检测，监听连接状态变化
     _heartbeat.start((status) {
       connectionStatus = status;
@@ -50,29 +54,39 @@ class ChatProvider extends ChangeNotifier {
 
   // ==================== 常量配置 ====================
 
+  /// 应用设置
+  AppSettings _appSettings = const AppSettings();
+
+  /// 获取应用设置
+  AppSettings get appSettings => _appSettings;
+
+  /// 加载应用设置
+  Future<void> _loadAppSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('app_settings_v1');
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          _appSettings = AppSettings.fromJson(
+            decoded.map((k, v) => MapEntry(k.toString(), v)),
+          );
+        }
+      } catch (_) {}
+    }
+  }
+
   /// 事件总结阈值
-  ///
-  /// 当某个层级（短期/长期）中未总结的事件数量达到此值时，
-  /// 触发LLM进行事件总结，将多个事件合并为一个更高层级的事件
-  static const int _summaryThreshold = 10;
+  int get _summaryThreshold => _appSettings.summaryThreshold;
 
   /// 短期事件队列最大容量
-  ///
-  /// 超过此容量时，最旧的事件会被移除
-  /// 限制为 2000 以防止本地存储过大
-  static const int _maxShortQueue = 2000;
+  int get _maxShortQueue => _appSettings.maxShortQueue;
 
   /// 长期事件队列最大容量
-  ///
-  /// 前5条固定输入LLM，其余应用LRU排序
-  /// 限制为 500 以平衡存储和性能
-  static const int _maxLongQueue = 500;
+  int get _maxLongQueue => _appSettings.maxLongQueue;
 
   /// 超长期事件队列最大容量
-  ///
-  /// 前2条固定输入LLM，其余应用LRU排序
-  /// 限制为 200 以平衡存储和性能
-  static const int _maxUltraQueue = 200;
+  int get _maxUltraQueue => _appSettings.maxUltraQueue;
 
   /// 关键词提取正则表达式
   ///
@@ -288,6 +302,7 @@ class ChatProvider extends ChangeNotifier {
     required String avatar,
     List<String> personality = const <String>[],
     List<String> appearance = const <String>[],
+    List<String> personalInfo = const <String>[],
     List<Map<String, dynamic>> settings = const <Map<String, dynamic>>[],
     List<String> backgroundStory = const <String>[],
     ContactCategory category = ContactCategory.contact,
@@ -303,6 +318,7 @@ class ChatProvider extends ChangeNotifier {
       avatar: avatar.trim(),
       personality: personality,
       appearance: appearance,
+      personalInfo: personalInfo,
       settings: settings,
       backgroundStory: backgroundStory,
       category: category,
@@ -386,6 +402,95 @@ class ChatProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       debugPrint('addContactFromJson failed: $e');
+      return false;
+    }
+  }
+
+  /// 从 JSON 创建联系人，支持后备字段合并
+  ///
+  /// 当 JSON 中缺少某些字段时，使用后备字段填充
+  /// 适用于 JSON 模式和自然语言模式，允许用户先在表单填写部分信息
+  Future<bool> addContactFromJsonWithFallback(
+    String jsonString, {
+    ContactCategory category = ContactCategory.contact,
+    String? fallbackName,
+    String? fallbackId,
+    String? fallbackAvatar,
+    List<String>? fallbackPersonality,
+    List<String>? fallbackAppearance,
+    List<String>? fallbackPersonalInfo,
+    List<Map<String, dynamic>>? fallbackSettings,
+    List<String>? fallbackBackgroundStory,
+  }) async {
+    try {
+      final json = jsonDecode(jsonString) as Map<String, dynamic>;
+
+      // 优先使用 JSON 中的值，否则使用后备值
+      final id = ((json['id'] ?? '').toString().trim()).isNotEmpty
+          ? (json['id'] ?? '').toString().trim()
+          : fallbackId?.trim() ?? '';
+      final name = ((json['name'] ?? '').toString().trim()).isNotEmpty
+          ? (json['name'] ?? '').toString().trim()
+          : fallbackName?.trim() ?? '';
+
+      if (id.isEmpty || name.isEmpty) return false;
+      if (_contacts.any((e) => e.id == id)) return false;
+
+      // 合并字段：JSON 优先，其次是后备值
+      final personality = _extractStrings(json['personality']).isNotEmpty
+          ? _extractStrings(json['personality'])
+          : fallbackPersonality ?? <String>[];
+      final appearance = _extractStrings(json['appearance']).isNotEmpty
+          ? _extractStrings(json['appearance'])
+          : fallbackAppearance ?? <String>[];
+      final personalInfo = _extractStrings(json['personalInfo']).isNotEmpty
+          ? _extractStrings(json['personalInfo'])
+          : fallbackPersonalInfo ?? <String>[];
+      final settings = _extractSettings(json['settings']).isNotEmpty
+          ? _extractSettings(json['settings'])
+          : fallbackSettings ?? <Map<String, dynamic>>[];
+      final backgroundStory =
+          _extractStrings(json['backgroundStory']).isNotEmpty
+              ? _extractStrings(json['backgroundStory'])
+              : fallbackBackgroundStory ?? <String>[];
+
+      final contact = Contact(
+        id: id,
+        name: name,
+        avatar: ((json['avatar'] ?? '').toString()).isNotEmpty
+            ? (json['avatar'] ?? '').toString()
+            : fallbackAvatar ?? '',
+        personality: personality,
+        appearance: appearance,
+        personalInfo: personalInfo,
+        settings: settings,
+        backgroundStory: backgroundStory,
+        worldKnowledge: WorldKnowledgeBucket(
+          _extractStrings(json['worldKnowledge']),
+        ),
+        selfKnowledge: SelfKnowledgeBucket(
+          _extractStrings(json['selfKnowledge']),
+        ),
+        userKnowledge: UserKnowledgeBucket(
+          _extractStrings(json['userKnowledge']),
+        ),
+        belongings: _extractStrings(json['belongings']),
+        status: _extractStrings(json['status']),
+        mood: (json['mood'] ?? '').toString(),
+        time: (json['time'] ?? '').toString(),
+        category: category,
+        createdAt: DateTime.now(),
+      );
+
+      _contacts.add(contact);
+      _messagesByContact.putIfAbsent(contact.id, () => <Message>[]);
+      _selectedContactId = contact.id;
+      await _agentStore.saveContacts(_contacts);
+      await _agentStore.saveMessagesByContact(_messagesByContact);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('addContactFromJsonWithFallback failed: $e');
       return false;
     }
   }
@@ -630,8 +735,8 @@ class ChatProvider extends ChangeNotifier {
 
       // 调试模式：显示关键词和完整Prompt
       if (isDebugMode) {
-        final structured =
-            StructuredInputPromptComposer.composeStructuredOutputPrompt(
+        final composer = StructuredInputPromptComposer(settings: _appSettings);
+        final structured = composer.composeStructuredOutputPrompt(
           userInput: userMessage.content,
           systemPrompt: systemPrompt,
           outputSchema: _debugOutputSchema,
@@ -738,10 +843,11 @@ class ChatProvider extends ChangeNotifier {
     final patchBelongings = _extractBelongingPatchItems(patch['belongings']);
 
     // 更新事件图
-    // 每轮清空belongingEventQueues和edges，只保留当前轮的关联
+    // 每轮清空belongingEventQueues、settingEventQueues和edges，只保留当前轮的关联
     var graph = contact.eventGraph.copyWith(
       turnCount: contact.eventGraph.turnCount + 1,
       belongingEventQueues: const <String, List<String>>{},
+      settingEventQueues: const <String, List<String>>{},
       edges: const <EventEdge>[],
     );
 
@@ -767,6 +873,14 @@ class ChatProvider extends ChangeNotifier {
       graph: graph,
       eventNodeId: currentEventNodeId,
       patch: patchBelongings,
+    );
+
+    // 更新设定关联和边关系
+    graph = _applySettingQueuesAndEdges(
+      graph: graph,
+      eventNodeId: currentEventNodeId,
+      settings: contact.settings,
+      userInput: userInput,
     );
 
     // 触发事件总结
@@ -914,14 +1028,18 @@ class ChatProvider extends ChangeNotifier {
     List<EventNode> candidates,
   ) {
     final b = StringBuffer();
-    b.writeln('你是事件归并器。');
-    b.writeln(
-        '任务：将以下${_tierLabel(source)}事件归并且简写为 1 条${_tierLabel(target)}事件。');
+    b.writeln('你是事件总结器。');
+    b.writeln('任务：将以下${_tierLabel(source)}事件概括为 1 条${_tierLabel(target)}事件。');
     b.writeln(
       '只输出 JSON。格式：{"n":10,"event":{"time":"","location":"","characters":"","cause":"","process":"","result":"","attitude":""}}',
     );
-    b.writeln('- 优先输出可归并的最近 N 条，n>=2 且 <=10。');
-    b.writeln('- 若过于离散无法选择更小整体，输出 n=10 强制总结。');
+    b.writeln('- n: 选择要概括的最近 N 条事件，n>=2 且 <=10。');
+    b.writeln('- event: 概括总结这 N 条事件的核心内容，要求：');
+    b.writeln('  * 高度概括，提炼关键信息，去除细节描述');
+    b.writeln('  * 保留时间、地点、人物、起因、结果等核心要素');
+    b.writeln('  * process 字段用一句话简要描述主要经过');
+    b.writeln('  * 不要罗列具体细节，要抽象总结');
+    b.writeln('- 若事件过于离散无法概括，输出 n=10 强制总结。');
     for (int i = 0; i < candidates.length; i++) {
       b.writeln('${i + 1}. ${candidates[i].event.toPromptLine()}');
     }
@@ -1258,6 +1376,20 @@ class ChatProvider extends ChangeNotifier {
         }
       }
 
+      // 4. 检查是否有event-setting关联
+      for (final entry in graph.settingEventQueues.entries) {
+        final queue = entry.value;
+        if (queue.contains(node.id)) {
+          final settingKeywords = _extractLocalKeywords(entry.key).toSet();
+          if (keywords.intersection(settingKeywords).isNotEmpty) {
+            score += 30;
+          } else {
+            score += 10;
+          }
+          break;
+        }
+      }
+
       scores[node.id] = score;
     }
 
@@ -1394,6 +1526,69 @@ class ChatProvider extends ChangeNotifier {
     }
     return out.copyWith(belongingEventQueues: queues);
   }
+
+  /// 应用设定关联队列和边关系
+  ///
+  /// 根据用户输入中的关键词，匹配 contact.settings 中的设定，
+  /// 建立 setting-event 关联，类似于 belongings 的处理方式
+  EventGraphMemory _applySettingQueuesAndEdges({
+    required EventGraphMemory graph,
+    required String? eventNodeId,
+    required List<Map<String, dynamic>> settings,
+    required String userInput,
+  }) {
+    if (eventNodeId == null ||
+        eventNodeId.isEmpty ||
+        settings.isEmpty ||
+        userInput.trim().isEmpty) {
+      return graph;
+    }
+
+    // 提取用户输入中的关键词
+    final inputKeywords = _extractLocalKeywords(userInput).toSet();
+    if (inputKeywords.isEmpty) return graph;
+
+    final queues = <String, List<String>>{
+      for (final e in graph.settingEventQueues.entries)
+        e.key: List<String>.from(e.value),
+    };
+    var out = graph;
+
+    for (final setting in settings) {
+      final key = (setting['key'] as String? ?? '').trim();
+      final value = (setting['value'] as String? ?? '').trim();
+      final relate = (setting['relate'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          <String>[];
+
+      if (key.isEmpty) continue;
+
+      // 构建可搜索文本：key + value + relate
+      final searchableText = '$key $value ${relate.join(' ')}';
+      final settingKeywords = _extractLocalKeywords(searchableText).toSet();
+
+      // 检查是否有关键词匹配
+      if (inputKeywords.intersection(settingKeywords).isNotEmpty) {
+        // 建立 setting-event 关联
+        final queue = queues.putIfAbsent(key, () => <String>[]);
+        queue.add(eventNodeId);
+        // 限制队列长度
+        if (queue.length > 100) queue.removeRange(0, queue.length - 100);
+        // 建立边关系
+        out = _appendEdge(
+          out,
+          fromNodeId: _settingNodeId(key),
+          toNodeId: eventNodeId,
+        );
+      }
+    }
+
+    return out.copyWith(settingEventQueues: queues);
+  }
+
+  /// 生成设定节点的ID
+  String _settingNodeId(String key) => 'setting:${key.trim().toLowerCase()}';
 
   /// 将事件节点加入指定层级队列
   ///
@@ -1664,7 +1859,8 @@ class ChatProvider extends ChangeNotifier {
   }) {
     final base = basePrompt.trim();
     if (contact == null) return base;
-    return StructuredInputPromptComposer.composeSystemPromptWithContactObject(
+    final composer = StructuredInputPromptComposer(settings: _appSettings);
+    return composer.composeSystemPromptWithContactObject(
       basePrompt: base,
       contact: contact,
     );

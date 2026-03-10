@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../../core/presentation/pages/app_settings_page.dart';
 import '../../data/models/contact.dart';
 import '../../data/models/message.dart';
 import '../../domain/providers/chat_provider.dart';
@@ -157,10 +158,24 @@ class _ChatPageState extends State<ChatPage> {
         return;
       }
 
-      // 使用转换后的 JSON 创建角色
-      final ok = await _provider.addContactFromJson(
+      // 使用转换后的 JSON 创建，合并表单中填写的字段
+      final ok = await _provider.addContactFromJsonWithFallback(
         jsonStr,
         category: result.category,
+        fallbackName: result.name.isNotEmpty ? result.name : null,
+        fallbackId: result.id.isNotEmpty ? result.id : null,
+        fallbackAvatar: result.avatar.isNotEmpty ? result.avatar : null,
+        fallbackPersonality:
+            result.personality.isNotEmpty ? result.personality : null,
+        fallbackAppearance:
+            result.appearance?.isNotEmpty == true ? result.appearance : null,
+        fallbackPersonalInfo: result.personalInfo?.isNotEmpty == true
+            ? result.personalInfo
+            : null,
+        fallbackSettings:
+            result.settings?.isNotEmpty == true ? result.settings : null,
+        fallbackBackgroundStory:
+            result.backgroundStory.isNotEmpty ? result.backgroundStory : null,
       );
       if (!mounted) return;
 
@@ -179,9 +194,24 @@ class _ChatPageState extends State<ChatPage> {
 
     // 判断是否是 JSON 模式
     if (result.isJsonMode) {
-      final ok = await _provider.addContactFromJson(
+      // 使用 JSON 创建，合并表单中填写的字段作为后备
+      final ok = await _provider.addContactFromJsonWithFallback(
         result.jsonString!,
         category: result.category,
+        fallbackName: result.name.isNotEmpty ? result.name : null,
+        fallbackId: result.id.isNotEmpty ? result.id : null,
+        fallbackAvatar: result.avatar.isNotEmpty ? result.avatar : null,
+        fallbackPersonality:
+            result.personality.isNotEmpty ? result.personality : null,
+        fallbackAppearance:
+            result.appearance?.isNotEmpty == true ? result.appearance : null,
+        fallbackPersonalInfo: result.personalInfo?.isNotEmpty == true
+            ? result.personalInfo
+            : null,
+        fallbackSettings:
+            result.settings?.isNotEmpty == true ? result.settings : null,
+        fallbackBackgroundStory:
+            result.backgroundStory.isNotEmpty ? result.backgroundStory : null,
       );
       if (!mounted) return;
       if (!ok) {
@@ -200,6 +230,7 @@ class _ChatPageState extends State<ChatPage> {
         avatar: result.avatar,
         personality: result.personality,
         appearance: result.appearance ?? [],
+        personalInfo: result.personalInfo ?? [],
         settings: result.settings ?? [],
         backgroundStory: result.backgroundStory,
         category: result.category,
@@ -245,6 +276,17 @@ class _ChatPageState extends State<ChatPage> {
                 onPressed: _openApiSettingDialog,
                 tooltip: 'API 配置',
                 icon: const Icon(Icons.key_outlined),
+              ),
+              IconButton(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const AppSettingsPage(),
+                    ),
+                  );
+                },
+                tooltip: '应用设置',
+                icon: const Icon(Icons.settings_outlined),
               ),
               IconButton(
                 onPressed: _provider.toggleDebugMode,

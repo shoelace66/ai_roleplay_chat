@@ -1,5 +1,6 @@
-import '../../domain/services/ai_service.dart';
-import '../../domain/structured/structured_input_prompt_composer.dart';
+import '../../../../core/data/models/app_settings.dart';
+import '../../../../core/utils/structured_input_prompt_composer.dart';
+import '../../../../infrastructure/services/ai_service.dart';
 import '../models/message.dart';
 
 class ChatRepository {
@@ -47,12 +48,14 @@ class ChatRepository {
     required String contactName,
     required Message userMessage,
     String? systemPrompt,
+    AppSettings? settings,
   }) async {
     final list = _cacheByContact.putIfAbsent(contactId, () => <Message>[]);
     list.add(userMessage);
 
-    final mergedPrompt =
-        StructuredInputPromptComposer.composeStructuredOutputPrompt(
+    final composer = StructuredInputPromptComposer(
+        settings: settings ?? const AppSettings());
+    final mergedPrompt = composer.composeStructuredOutputPrompt(
       userInput: userMessage.content,
       systemPrompt: systemPrompt,
       outputSchema: _outputSchema,

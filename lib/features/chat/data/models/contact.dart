@@ -311,6 +311,7 @@ class EventGraphMemory {
     this.ultraLongTermQueue = const <EventNode>[],
     this.knowledgeNodes = const <KnowledgeNode>[],
     this.belongingEventQueues = const <String, List<String>>{},
+    this.settingEventQueues = const <String, List<String>>{},
     this.edges = const <EventEdge>[],
     this.turnCount = 0,
   });
@@ -320,6 +321,7 @@ class EventGraphMemory {
   final List<EventNode> ultraLongTermQueue;
   final List<KnowledgeNode> knowledgeNodes;
   final Map<String, List<String>> belongingEventQueues;
+  final Map<String, List<String>> settingEventQueues;
   final List<EventEdge> edges;
   final int turnCount;
 
@@ -331,6 +333,7 @@ class EventGraphMemory {
       knowledgeNodes: _readKnowledgeNodeList(json['knowledgeNodes']),
       belongingEventQueues:
           _readBelongingEventQueues(json['belongingEventQueues']),
+      settingEventQueues: _readBelongingEventQueues(json['settingEventQueues']),
       edges: _readEventEdgeList(json['edges']),
       turnCount:
           (json['turnCount'] is num) ? (json['turnCount'] as num).toInt() : 0,
@@ -344,6 +347,7 @@ class EventGraphMemory {
       'ultraLongTermQueue': ultraLongTermQueue.map((e) => e.toJson()).toList(),
       'knowledgeNodes': knowledgeNodes.map((e) => e.toJson()).toList(),
       'belongingEventQueues': belongingEventQueues,
+      'settingEventQueues': settingEventQueues,
       'edges': edges.map((e) => e.toJson()).toList(),
       'turnCount': turnCount,
     };
@@ -355,6 +359,7 @@ class EventGraphMemory {
     List<EventNode>? ultraLongTermQueue,
     List<KnowledgeNode>? knowledgeNodes,
     Map<String, List<String>>? belongingEventQueues,
+    Map<String, List<String>>? settingEventQueues,
     List<EventEdge>? edges,
     int? turnCount,
   }) {
@@ -364,6 +369,7 @@ class EventGraphMemory {
       ultraLongTermQueue: ultraLongTermQueue ?? this.ultraLongTermQueue,
       knowledgeNodes: knowledgeNodes ?? this.knowledgeNodes,
       belongingEventQueues: belongingEventQueues ?? this.belongingEventQueues,
+      settingEventQueues: settingEventQueues ?? this.settingEventQueues,
       edges: edges ?? this.edges,
       turnCount: turnCount ?? this.turnCount,
     );
@@ -380,7 +386,7 @@ class EventGraphMemory {
     ];
   }
 
-  List<EventMemory> relatedEventsForPrompt(String userInput) {
+  List<EventMemory> relatedEventsForPrompt(String userInput, {int maxResults = 5}) {
     final keywords = _extractKeywords(userInput);
     if (keywords.isEmpty) return const <EventMemory>[];
 
@@ -419,18 +425,18 @@ class EventGraphMemory {
     final seen = <String>{};
 
     for (final hit in scored) {
-      if (result.length >= 5) break;
+      if (result.length >= maxResults) break;
       if (seen.add(hit.node.id)) result.add(hit.node.event);
       final neighbors = adjacent[hit.node.id] ?? const <String>{};
       for (final id in neighbors) {
-        if (result.length >= 5) break;
+        if (result.length >= maxResults) break;
         final node = idToNode[id];
         if (node == null) continue;
         if (seen.add(node.id)) result.add(node.event);
       }
     }
 
-    if (result.length >= 5) return result.take(5).toList();
+    if (result.length >= maxResults) return result.take(maxResults).toList();
 
     final scoredBelongings = <_ScoredBelonging>[];
     for (final key in belongingEventQueues.keys) {
@@ -443,13 +449,33 @@ class EventGraphMemory {
     for (final b in scoredBelongings) {
       final queue = belongingEventQueues[b.name] ?? const <String>[];
       for (final eventId in queue.reversed) {
-        if (result.length >= 5) break;
+        if (result.length >= maxResults) break;
         final node = idToNode[eventId];
         if (node == null) continue;
         if (seen.add(node.id)) result.add(node.event);
       }
     }
-    return result.take(5).toList();
+
+    // 搜索 settingEventQueues（类似 belongings 的搜索逻辑）
+    final scoredSettings = <_ScoredSetting>[];
+    for (final key in settingEventQueues.keys) {
+      final score = _keywordHitCount(keywords, _extractKeywords(key));
+      if (score > 0) {
+        scoredSettings.add(_ScoredSetting(key: key, score: score));
+      }
+    }
+    scoredSettings.sort((a, b) => b.score.compareTo(a.score));
+    for (final s in scoredSettings) {
+      final queue = settingEventQueues[s.key] ?? const <String>[];
+      for (final eventId in queue.reversed) {
+        if (result.length >= maxResults) break;
+        final node = idToNode[eventId];
+        if (node == null) continue;
+        if (seen.add(node.id)) result.add(node.event);
+      }
+    }
+
+    return result.take(maxResults).toList();
   }
 
   static int _keywordHitCount(Set<String> lhs, Set<String> rhs) {
@@ -485,6 +511,12 @@ class _ScoredBelonging {
   final int score;
 }
 
+class _ScoredSetting {
+  const _ScoredSetting({required this.key, required this.score});
+  final String key;
+  final int score;
+}
+
 class Contact {
   Contact({
     required this.id,
@@ -493,6 +525,7 @@ class Contact {
     this.category = ContactCategory.contact,
     this.personality = const <String>[],
     this.appearance = const <String>[],
+    this.personalInfo = const <String>[],
     this.settings = const <Map<String, dynamic>>[],
     this.backgroundStory = const <String>[],
     this.worldKnowledge = const WorldKnowledgeBucket.empty(),
@@ -513,6 +546,7 @@ class Contact {
   final ContactCategory category;
   final List<String> personality;
   final List<String> appearance;
+  final List<String> personalInfo;
   final List<Map<String, dynamic>> settings;
   final List<String> backgroundStory;
   final WorldKnowledgeBucket worldKnowledge;
@@ -538,6 +572,7 @@ class Contact {
       category: _contactCategoryFromStorage(categoryText),
       personality: _readStringList(json['personality']),
       appearance: _readStringList(json['appearance']),
+      personalInfo: _readStringList(json['personalInfo']),
       settings: _readSettingsList(json['settings']),
       backgroundStory: _readStringList(json['backgroundStory']),
       worldKnowledge:
@@ -565,6 +600,7 @@ class Contact {
       'category': category.name,
       'personality': personality,
       'appearance': appearance,
+      'personalInfo': personalInfo,
       'settings': settings,
       'backgroundStory': backgroundStory,
       'worldKnowledge': worldKnowledge.items,

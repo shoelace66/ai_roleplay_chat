@@ -9,6 +9,7 @@ class ContactDraft {
     required this.avatar,
     required this.personality,
     this.appearance,
+    this.personalInfo,
     this.settings,
     required this.backgroundStory,
     required this.category,
@@ -21,6 +22,7 @@ class ContactDraft {
   final String avatar;
   final List<String> personality;
   final List<String>? appearance;
+  final List<String>? personalInfo;
   final List<Map<String, dynamic>>? settings;
   final List<String> backgroundStory;
   final ContactCategory category;
@@ -44,19 +46,27 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
   final TextEditingController _avatarCtrl = TextEditingController();
   final TextEditingController _personalityCtrl = TextEditingController();
   final TextEditingController _appearanceCtrl = TextEditingController();
+  final TextEditingController _personalInfoCtrl = TextEditingController();
   final TextEditingController _backgroundCtrl = TextEditingController();
 
   final List<String> _personality = <String>[];
   final List<String> _appearance = <String>[];
+  final List<String> _personalInfo = <String>[];
   final List<String> _backgroundStory = <String>[];
 
   ContactCategory _category = ContactCategory.contact;
   _EditorMode _mode = _EditorMode.normal;
 
+  // JSON 和自然语言模式控制器
+  final TextEditingController _jsonCtrl = TextEditingController();
+  final TextEditingController _nlCtrl = TextEditingController();
+
   // 故事设定 key-value 编辑器相关
   final TextEditingController _settingKeyCtrl = TextEditingController();
   final TextEditingController _settingValueCtrl = TextEditingController();
-  final List<Map<String, String>> _storySettings = <Map<String, String>>[];
+  final TextEditingController _settingRelateCtrl = TextEditingController();
+  final List<String> _tempRelateList = <String>[];
+  final List<Map<String, dynamic>> _storySettings = <Map<String, dynamic>>[];
 
   @override
   void dispose() {
@@ -65,9 +75,13 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
     _avatarCtrl.dispose();
     _personalityCtrl.dispose();
     _appearanceCtrl.dispose();
+    _personalInfoCtrl.dispose();
     _backgroundCtrl.dispose();
+    _jsonCtrl.dispose();
+    _nlCtrl.dispose();
     _settingKeyCtrl.dispose();
     _settingValueCtrl.dispose();
+    _settingRelateCtrl.dispose();
     super.dispose();
   }
 
@@ -197,15 +211,72 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
                 final value = _settingValueCtrl.text.trim();
                 if (key.isEmpty || value.isEmpty) return;
                 setState(() {
-                  _storySettings.add({'key': key, 'value': value});
+                  _storySettings.add({
+                    'key': key,
+                    'value': value,
+                    'relate': List<String>.from(_tempRelateList),
+                  });
                   _settingKeyCtrl.clear();
                   _settingValueCtrl.clear();
+                  _tempRelateList.clear();
                 });
               },
               child: const Text('添加'),
             ),
           ],
         ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _settingRelateCtrl,
+                decoration: const InputDecoration(
+                  hintText: '输入关联词后点击添加',
+                  isDense: true,
+                  prefixIcon: Icon(Icons.link, size: 18),
+                ),
+                onSubmitted: (_) {
+                  final input = _settingRelateCtrl.text.trim();
+                  if (input.isEmpty) return;
+                  setState(() {
+                    _tempRelateList.add(input);
+                    _settingRelateCtrl.clear();
+                  });
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.tonal(
+              onPressed: () {
+                final input = _settingRelateCtrl.text.trim();
+                if (input.isEmpty) return;
+                setState(() {
+                  _tempRelateList.add(input);
+                  _settingRelateCtrl.clear();
+                });
+              },
+              child: const Text('添加关联词'),
+            ),
+          ],
+        ),
+        if (_tempRelateList.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (var i = 0; i < _tempRelateList.length; i++)
+                Chip(
+                  label: Text(_tempRelateList[i]),
+                  deleteIcon: const Icon(Icons.close, size: 18),
+                  onDeleted: () => setState(() => _tempRelateList.removeAt(i)),
+                  backgroundColor:
+                      Theme.of(context).colorScheme.primaryContainer,
+                ),
+            ],
+          ),
+        ],
         const SizedBox(height: 6),
         if (_storySettings.isEmpty)
           const Text('暂无设定条目', style: TextStyle(color: Colors.grey))
@@ -217,7 +288,8 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
               for (var i = 0; i < _storySettings.length; i++)
                 InputChip(
                   label: Text('${_storySettings[i]['key']}'),
-                  tooltip: _storySettings[i]['value'],
+                  tooltip:
+                      '${_storySettings[i]['value']}${(_storySettings[i]['relate'] as List<String>?)?.isNotEmpty == true ? '\n关联: ${(_storySettings[i]['relate'] as List<String>).join(' ')}' : ''}',
                   onPressed: () async {
                     final keyCtrl = TextEditingController(
                       text: _storySettings[i]['key'],
@@ -225,28 +297,21 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
                     final valueCtrl = TextEditingController(
                       text: _storySettings[i]['value'],
                     );
-                    final result = await showDialog<Map<String, String>?>(
+                    final relateList =
+                        (_storySettings[i]['relate'] as List<dynamic>?)
+                                ?.cast<String>() ??
+                            <String>[];
+                    final relateCtrl = TextEditingController(
+                      text: relateList.join(' '),
+                    );
+                    final result = await showDialog<Map<String, dynamic>?>(
                       context: context,
                       builder: (context) => AlertDialog(
                         title: const Text('修改设定'),
-                        content: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            TextField(
-                              controller: keyCtrl,
-                              decoration: const InputDecoration(
-                                labelText: '设定名称',
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: valueCtrl,
-                              decoration: const InputDecoration(
-                                labelText: '设定描述',
-                              ),
-                              maxLines: 3,
-                            ),
-                          ],
+                        content: _EditSettingDialog(
+                          keyCtrl: keyCtrl,
+                          valueCtrl: valueCtrl,
+                          initialRelate: relateList,
                         ),
                         actions: [
                           TextButton(
@@ -254,10 +319,13 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
                             child: const Text('取消'),
                           ),
                           FilledButton(
-                            onPressed: () => Navigator.of(context).pop({
-                              'key': keyCtrl.text.trim(),
-                              'value': valueCtrl.text.trim(),
-                            }),
+                            onPressed: () {
+                              Navigator.of(context).pop({
+                                'key': keyCtrl.text.trim(),
+                                'value': valueCtrl.text.trim(),
+                                'relate': _EditSettingDialog.relateList,
+                              });
+                            },
                             child: const Text('保存'),
                           ),
                         ],
@@ -381,6 +449,15 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
             controller: _personalityCtrl,
           ),
           const SizedBox(height: 16),
+          if (_category == ContactCategory.contact) ...[
+            _buildArrayEditor(
+              title: '个人信息',
+              hint: '输入个人信息后点击添加，如：职业、年龄、能力等tag',
+              items: _personalInfo,
+              controller: _personalInfoCtrl,
+            ),
+            const SizedBox(height: 16),
+          ],
           _buildArrayEditor(
             title: _category == ContactCategory.story ? '背景概述' : '背景故事',
             hint: '输入背景内容后点击添加',
@@ -414,7 +491,6 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
   }
 
   Widget _buildJsonForm() {
-    final TextEditingController jsonCtrl = TextEditingController();
     final example = _category == ContactCategory.story
         ? '''{
   "id": "story-001",
@@ -431,7 +507,9 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
   "appearance": ["黑色外套", "短发"],
   "backgroundStory": ["资深侦探"]
 }''';
-    jsonCtrl.text = example;
+    if (_jsonCtrl.text.isEmpty) {
+      _jsonCtrl.text = example;
+    }
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -465,7 +543,7 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
           ],
         ),
         TextField(
-          controller: jsonCtrl,
+          controller: _jsonCtrl,
           minLines: 10,
           maxLines: 15,
           decoration: const InputDecoration(
@@ -495,11 +573,12 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
   }
 
   Widget _buildNaturalLanguageForm() {
-    final TextEditingController nlCtrl = TextEditingController(
-      text: _category == ContactCategory.story
-          ? '创建一个魔法世界的故事，包含魔法师、魔法石等元素'
-          : '创建一个名叫阿星的侦探，性格理性冷静，穿着黑色外套',
-    );
+    final example = _category == ContactCategory.story
+        ? '创建一个魔法世界的故事，包含魔法师、魔法石等元素'
+        : '创建一个名叫阿星的侦探，性格理性冷静，穿着黑色外套';
+    if (_nlCtrl.text.isEmpty) {
+      _nlCtrl.text = example;
+    }
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -533,7 +612,7 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
           ],
         ),
         TextField(
-          controller: nlCtrl,
+          controller: _nlCtrl,
           minLines: 6,
           maxLines: 10,
           decoration: InputDecoration(
@@ -606,7 +685,11 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
     final List<Map<String, dynamic>> settings =
         _category == ContactCategory.story
             ? _storySettings
-                .map((e) => {'key': e['key'], 'value': e['value']})
+                .map((e) => {
+                      'key': e['key'],
+                      'value': e['value'],
+                      'relate': e['relate'] ?? <String>[],
+                    })
                 .toList()
             : <Map<String, dynamic>>[];
 
@@ -619,6 +702,9 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
         appearance: _category == ContactCategory.contact
             ? List<String>.from(_appearance)
             : null,
+        personalInfo: _category == ContactCategory.contact
+            ? List<String>.from(_personalInfo)
+            : null,
         settings: settings,
         backgroundStory: List<String>.from(_backgroundStory),
         category: _category,
@@ -627,29 +713,61 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
   }
 
   void _saveJsonMode() {
+    final jsonStr = _jsonCtrl.text.trim();
+    if (jsonStr.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('JSON 不能为空')),
+      );
+      return;
+    }
     Navigator.of(context).pop(
       ContactDraft(
-        name: '',
-        id: '',
-        avatar: '',
-        personality: const [],
-        backgroundStory: const [],
+        name: _nameCtrl.text.trim(),
+        id: _idCtrl.text.trim(),
+        avatar: _avatarCtrl.text.trim(),
+        personality: List<String>.from(_personality),
+        appearance: List<String>.from(_appearance),
+        personalInfo: List<String>.from(_personalInfo),
+        settings: _storySettings
+            .map((e) => {
+                  'key': e['key'],
+                  'value': e['value'],
+                  'relate': e['relate'] ?? <String>[],
+                })
+            .toList(),
+        backgroundStory: List<String>.from(_backgroundStory),
         category: _category,
-        jsonString: '{}',
+        jsonString: jsonStr,
       ),
     );
   }
 
   void _saveNaturalLanguageMode() {
+    final nlText = _nlCtrl.text.trim();
+    if (nlText.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('描述不能为空')),
+      );
+      return;
+    }
     Navigator.of(context).pop(
       ContactDraft(
-        name: '',
-        id: '',
-        avatar: '',
-        personality: const [],
-        backgroundStory: const [],
+        name: _nameCtrl.text.trim(),
+        id: _idCtrl.text.trim(),
+        avatar: _avatarCtrl.text.trim(),
+        personality: List<String>.from(_personality),
+        appearance: List<String>.from(_appearance),
+        personalInfo: List<String>.from(_personalInfo),
+        settings: _storySettings
+            .map((e) => {
+                  'key': e['key'],
+                  'value': e['value'],
+                  'relate': e['relate'] ?? <String>[],
+                })
+            .toList(),
+        backgroundStory: List<String>.from(_backgroundStory),
         category: _category,
-        naturalLanguage: '创建一个角色',
+        naturalLanguage: nlText,
       ),
     );
   }
@@ -659,4 +777,120 @@ enum _EditorMode {
   normal,
   json,
   naturalLanguage,
+}
+
+/// 编辑设定对话框内容组件
+///
+/// 用于编辑设定的关联词列表，支持逐个添加和删除
+class _EditSettingDialog extends StatefulWidget {
+  const _EditSettingDialog({
+    required this.keyCtrl,
+    required this.valueCtrl,
+    required this.initialRelate,
+  });
+
+  final TextEditingController keyCtrl;
+  final TextEditingController valueCtrl;
+  final List<String> initialRelate;
+
+  static List<String> relateList = <String>[];
+
+  @override
+  State<_EditSettingDialog> createState() => _EditSettingDialogState();
+}
+
+class _EditSettingDialogState extends State<_EditSettingDialog> {
+  final TextEditingController _relateCtrl = TextEditingController();
+  final List<String> _relateList = <String>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _relateList.addAll(widget.initialRelate);
+    _EditSettingDialog.relateList = _relateList;
+  }
+
+  @override
+  void dispose() {
+    _relateCtrl.dispose();
+    super.dispose();
+  }
+
+  void _addRelate() {
+    final input = _relateCtrl.text.trim();
+    if (input.isEmpty) return;
+    setState(() {
+      _relateList.add(input);
+      _EditSettingDialog.relateList = _relateList;
+      _relateCtrl.clear();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: widget.keyCtrl,
+          decoration: const InputDecoration(
+            labelText: '设定名称',
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: widget.valueCtrl,
+          decoration: const InputDecoration(
+            labelText: '设定描述',
+          ),
+          maxLines: 3,
+        ),
+        const SizedBox(height: 16),
+        const Text('关联词'),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _relateCtrl,
+                decoration: const InputDecoration(
+                  hintText: '输入关联词',
+                  isDense: true,
+                ),
+                onSubmitted: (_) => _addRelate(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.tonal(
+              onPressed: _addRelate,
+              child: const Text('添加'),
+            ),
+          ],
+        ),
+        if (_relateList.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (var i = 0; i < _relateList.length; i++)
+                Chip(
+                  label: Text(_relateList[i]),
+                  deleteIcon: const Icon(Icons.close, size: 18),
+                  onDeleted: () {
+                    setState(() {
+                      _relateList.removeAt(i);
+                      _EditSettingDialog.relateList = _relateList;
+                    });
+                  },
+                  backgroundColor:
+                      Theme.of(context).colorScheme.primaryContainer,
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
 }
