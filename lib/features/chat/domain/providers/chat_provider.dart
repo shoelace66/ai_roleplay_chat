@@ -280,6 +280,13 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 刷新连接状态
+  /// 
+  /// 手动触发重新连接检查
+  void refreshConnection() {
+    _heartbeat.markReconnecting();
+  }
+
   // ==================== 联系人管理 ====================
 
   /// 选择联系人
@@ -685,6 +692,7 @@ class ChatProvider extends ChangeNotifier {
       role: MessageRole.user,
       content: input,
       createdAt: DateTime.now(),
+      status: MessageStatus.sending,
     );
     final currentList =
         _messagesByContact.putIfAbsent(selected.id, () => <Message>[]);
@@ -768,10 +776,20 @@ class ChatProvider extends ChangeNotifier {
         systemPrompt: systemPrompt,
       );
 
+      // 更新用户消息状态为已发送
+      _updateMessageStatus(selected.id, userMessage.id, MessageStatus.sent);
+
       // 步骤6: 提取回复内容（从JSON中提取reply字段）
-      final replyContent =
-          StructuredOutputRegexParser.extractReply(reply.content) ??
-              reply.content;
+      final replyContent = StructuredOutputRegexParser.extractReply(reply.content);
+      
+      // 检查是否成功提取到回复内容
+      if (replyContent == null) {
+        // 如果提取失败，可能是AI返回了错误消息
+        error = 'AI 回复格式错误，请稍后重试';
+        _updateMessageStatus(selected.id, userMessage.id, MessageStatus.failed);
+        return;
+      }
+      
       currentList.add(
         Message(
           id: reply.id,
@@ -790,18 +808,57 @@ class ChatProvider extends ChangeNotifier {
       );
     } on AiServiceException catch (e) {
       error = e.userMessage;
+      _updateMessageStatus(selected.id, userMessage.id, MessageStatus.failed);
       _heartbeat.markReconnecting();
     } catch (e, st) {
       debugPrint('sendMessage failed: $e');
       debugPrint('$st');
       final raw = e.toString().trim();
       error = raw.isEmpty ? AppStrings.networkError : '请求失败：$raw';
+      _updateMessageStatus(selected.id, userMessage.id, MessageStatus.failed);
       _heartbeat.markReconnecting();
     } finally {
       isLoading = false;
       isTyping = false;
       notifyListeners();
     }
+  }
+
+  /// 重新发送消息
+  ///
+  /// 当消息发送失败时，用户可以点击重试
+  Future<void> resendMessage(String contactId, String messageId) async {
+    final messages = _messagesByContact[contactId];
+    if (messages == null) return;
+
+    final messageIndex = messages.indexWhere((m) => m.id == messageId);
+    if (messageIndex == -1) return;
+
+    final message = messages[messageIndex];
+    if (message.role != MessageRole.user ||
+        message.status != MessageStatus.failed) {
+      return;
+    }
+
+    // 更新消息状态为发送中
+    _updateMessageStatus(contactId, messageId, MessageStatus.sending);
+    notifyListeners();
+
+    // 重新发送消息
+    await sendMessage(message.content);
+  }
+
+  /// 更新消息状态
+  void _updateMessageStatus(
+      String contactId, String messageId, MessageStatus status) {
+    final messages = _messagesByContact[contactId];
+    if (messages == null) return;
+
+    final messageIndex = messages.indexWhere((m) => m.id == messageId);
+    if (messageIndex == -1) return;
+
+    messages[messageIndex] = messages[messageIndex].copyWith(status: status);
+    _agentStore.saveMessagesByContact(_messagesByContact);
   }
 
   // ==================== 记忆更新与事件管理 ====================

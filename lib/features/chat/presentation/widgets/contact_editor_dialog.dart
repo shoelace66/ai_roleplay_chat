@@ -301,9 +301,6 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
                         (_storySettings[i]['relate'] as List<dynamic>?)
                                 ?.cast<String>() ??
                             <String>[];
-                    final relateCtrl = TextEditingController(
-                      text: relateList.join(' '),
-                    );
                     final result = await showDialog<Map<String, dynamic>?>(
                       context: context,
                       builder: (context) => AlertDialog(

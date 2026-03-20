@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/services.dart';
 
 import 'package:flutter/material.dart';
 
@@ -6,7 +7,6 @@ import '../../../../core/presentation/pages/app_settings_page.dart';
 import '../../data/models/contact.dart';
 import '../../data/models/message.dart';
 import '../../domain/providers/chat_provider.dart';
-import '../../domain/services/heartbeat_manager.dart';
 import '../widgets/contact_sidebar.dart';
 import '../widgets/contact_editor_dialog.dart';
 
@@ -371,12 +371,13 @@ class _ChatPageState extends State<ChatPage> {
   Widget _buildMobileLayout(Contact? selected) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(selected == null ? '' : selected.name),
+        title: Text(selected == null ? 'Chat Demo' : selected.name),
         leading: Builder(
           builder: (context) => IconButton(
             icon: const Icon(Icons.menu),
             onPressed: () => Scaffold.of(context).openDrawer(),
             tooltip: '打开对象列表',
+            padding: const EdgeInsets.all(12),
           ),
         ),
         actions: [
@@ -385,6 +386,19 @@ class _ChatPageState extends State<ChatPage> {
             onPressed: _openApiSettingDialog,
             tooltip: 'API 配置',
             icon: const Icon(Icons.key_outlined),
+            padding: const EdgeInsets.all(12),
+          ),
+          IconButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const AppSettingsPage(),
+                ),
+              );
+            },
+            tooltip: '应用设置',
+            icon: const Icon(Icons.settings_outlined),
+            padding: const EdgeInsets.all(12),
           ),
           IconButton(
             onPressed: _provider.toggleDebugMode,
@@ -394,16 +408,20 @@ class _ChatPageState extends State<ChatPage> {
                   ? Icons.bug_report
                   : Icons.bug_report_outlined,
             ),
+            padding: const EdgeInsets.all(12),
           ),
         ],
+        elevation: 2,
+        scrolledUnderElevation: 4,
       ),
       drawer: Drawer(
+        width: 280,
         child: ContactSidebar(
           contacts: _provider.contacts,
           selectedContactId: _provider.selectedContactId,
           onSelect: (id) {
             _onSelectContact(id);
-            Navigator.of(context).pop();
+            Navigator.of(context).pop(); // 选择后自动关闭侧边栏
           },
           onAdd: () {
             Navigator.of(context).pop();
@@ -422,30 +440,63 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  Widget _buildChatArea(Contact? selected, {bool showAppBar = true}) {
+  Widget _buildChatArea(Contact? selected) {
+    final theme = Theme.of(context);
     return Column(
       children: [
-        if (_provider.connectionStatus == ConnectionStatus.reconnecting)
-          Container(
-            width: double.infinity,
-            color: Colors.orange.shade100,
-            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-            child: const Text(
-              '连接断开，正在重试...',
-              style: TextStyle(color: Colors.orange),
-            ),
-          ),
         if (selected == null)
-          const Expanded(child: Center(child: Text('暂无对象，请先创建')))
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.chat_bubble_outline,
+                    size: 64,
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '暂无对象，请先创建',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
         else
           Expanded(
             child: _provider.messages.isEmpty
-                ? const Center(child: Text('开始聊天吧'))
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.message_outlined,
+                          size: 64,
+                          color: theme.colorScheme.onSurface
+                              .withValues(alpha: 0.3),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          '开始聊天吧',
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurface
+                                .withValues(alpha: 0.6),
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
                 : ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 12,
+                      horizontal: 16,
+                      vertical: 16,
                     ),
                     itemCount: _provider.messages.length +
                         (_provider.isTyping ? 1 : 0),
@@ -455,24 +506,65 @@ class _ChatPageState extends State<ChatPage> {
                         return const _TypingBubble();
                       }
                       final m = _provider.messages[index];
-                      return _MessageBubble(message: m);
+                      return _AnimatedMessageBubble(
+                        child: _MessageBubble(
+                          message: m,
+                          onRetry: () {
+                            if (_provider.selectedContactId != null) {
+                              _provider.resendMessage(
+                                  _provider.selectedContactId!, m.id);
+                            }
+                          },
+                        ),
+                      );
                     },
                   ),
           ),
         if (_provider.error != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text(
-                _provider.error!,
-                style: const TextStyle(color: Colors.red),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.error.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: theme.colorScheme.error.withValues(alpha: 0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  _provider.error!,
+                  style: TextStyle(
+                    color: theme.colorScheme.error,
+                    fontSize: 14,
+                  ),
+                ),
               ),
             ),
           ),
         const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                spreadRadius: 0,
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+            border: Border.all(
+              color: theme.colorScheme.outline.withValues(alpha: 0.1),
+              width: 1,
+            ),
+          ),
           child: Row(
             children: [
               Expanded(
@@ -483,15 +575,35 @@ class _ChatPageState extends State<ChatPage> {
                   onSubmitted: (_) => _send(),
                   decoration: InputDecoration(
                     hintText: selected == null ? '请先创建对象' : '输入消息...',
-                    border: const OutlineInputBorder(),
+                    hintStyle: TextStyle(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                    ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
+                  ),
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed:
-                    _provider.isLoading || selected == null ? null : _send,
-                child: const Text('发送'),
+              Container(
+                margin: const EdgeInsets.only(right: 8),
+                child: FilledButton(
+                  onPressed:
+                      _provider.isLoading || selected == null ? null : _send,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    backgroundColor: theme.colorScheme.primary,
+                    foregroundColor: theme.colorScheme.onPrimary,
+                    elevation: 0,
+                  ),
+                  child: const Text('发送'),
+                ),
               ),
             ],
           ),
@@ -509,90 +621,358 @@ class ApiConfigDraft {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
+  const _MessageBubble({required this.message, required this.onRetry});
 
   final Message message;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
     final isUser = message.role == MessageRole.user;
     final time =
         '${message.createdAt.hour.toString().padLeft(2, '0')}:${message.createdAt.minute.toString().padLeft(2, '0')}';
+    final theme = Theme.of(context);
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 640),
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-          decoration: BoxDecoration(
-            color: isUser ? Colors.indigo.shade100 : Colors.grey.shade200,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SelectableText(message.content),
-              const SizedBox(height: 4),
-              Text(
-                time,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: Colors.grey.shade500),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isUser)
+              Container(
+                margin: const EdgeInsets.only(right: 8),
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    'AI',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ),
               ),
-            ],
-          ),
+            Expanded(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                decoration: BoxDecoration(
+                  color: isUser
+                      ? message.status == MessageStatus.failed
+                          ? Colors.red.shade50
+                          : theme.colorScheme.primary.withValues(alpha: 0.15)
+                      : theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(18),
+                    topRight: const Radius.circular(18),
+                    bottomLeft: isUser
+                        ? const Radius.circular(18)
+                        : const Radius.circular(4),
+                    bottomRight: isUser
+                        ? const Radius.circular(4)
+                        : const Radius.circular(18),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      spreadRadius: 0,
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: GestureDetector(
+                  onLongPress: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('消息操作'),
+                        content: Text(message.content),
+                        actions: [
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                            },
+                            child: const Text('取消'),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              // 复制文本到剪贴板
+                              Clipboard.setData(
+                                  ClipboardData(text: message.content));
+                              // 显示复制成功提示
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('文本已复制到剪贴板')),
+                              );
+                              Navigator.of(context).pop();
+                            },
+                            child: const Text('复制'),
+                          ),
+                          if (isUser)
+                            TextButton(
+                              onPressed: onRetry,
+                              child: const Text('重发'),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SelectableText(
+                        message.content,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              time,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurface
+                                      .withValues(alpha: 0.5)),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (isUser && message.status == MessageStatus.sending)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      theme.colorScheme.primary),
+                                ),
+                              ),
+                            ),
+                          if (isUser && message.status == MessageStatus.sent)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: Icon(
+                                Icons.check,
+                                size: 16,
+                                color: theme.colorScheme.onSurface
+                                    .withValues(alpha: 0.5),
+                              ),
+                            ),
+                          if (isUser && message.status == MessageStatus.failed)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 8),
+                              child: Icon(
+                                Icons.error_outline,
+                                size: 16,
+                                color: Colors.red,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (isUser)
+              Container(
+                margin: const EdgeInsets.only(left: 8),
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Icon(
+                    Icons.person,
+                    size: 18,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _TypingBubble extends StatelessWidget {
-  const _TypingBubble();
+class _AnimatedMessageBubble extends StatefulWidget {
+  const _AnimatedMessageBubble({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_AnimatedMessageBubble> createState() => _AnimatedMessageBubbleState();
+}
+
+class _AnimatedMessageBubbleState extends State<_AnimatedMessageBubble>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _opacityAnimation;
+  late Animation<double> _scaleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _opacityAnimation = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+    _scaleAnimation = Tween<double>(begin: 0.8, end: 1).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _opacityAnimation,
+      child: ScaleTransition(
+        scale: _scaleAnimation,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class _TypingBubble extends StatefulWidget {
+  const _TypingBubble();
+
+  @override
+  State<_TypingBubble> createState() => _TypingBubbleState();
+}
+
+class _TypingBubbleState extends State<_TypingBubble>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 1200),
+      vsync: this,
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Align(
       alignment: Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 200),
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-          decoration: BoxDecoration(
-            color: Colors.grey.shade200,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildDot(),
-              _buildDot(delay: 150),
-              _buildDot(delay: 300),
-            ],
-          ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  'AI',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ),
+            ),
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(18),
+                  topRight: const Radius.circular(18),
+                  bottomLeft: const Radius.circular(4),
+                  bottomRight: const Radius.circular(18),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    spreadRadius: 0,
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildDot(theme, delay: 0),
+                  _buildDot(theme, delay: 150),
+                  _buildDot(theme, delay: 300),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildDot({int delay = 0}) {
-    return Container(
-      width: 8,
-      height: 8,
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      decoration: const BoxDecoration(
-        color: Colors.grey,
-        shape: BoxShape.circle,
+  Widget _buildDot(ThemeData theme, {int delay = 0}) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.3, end: 1.0).animate(
+        CurvedAnimation(
+          parent: _controller,
+          curve: Interval(
+            delay / 1200, // 开始时间
+            (delay + 400) / 1200, // 结束时间
+            curve: Curves.easeInOut,
+          ),
+        ),
       ),
-      child: AnimatedOpacity(
-        opacity: 0.5,
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeInOut,
-        child: Container(),
+      child: Container(
+        width: 10,
+        height: 10,
+        margin: const EdgeInsets.symmetric(horizontal: 3),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+          shape: BoxShape.circle,
+        ),
       ),
     );
   }
