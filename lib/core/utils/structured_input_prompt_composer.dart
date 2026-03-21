@@ -208,7 +208,7 @@ $storySpecificRules
       for (final node in allNodes) node.id: node
     };
 
-    final eventEdges = contact.eventGraph.edges
+    final eventEdges = contact.eventGraph.edges.values
         .where((edge) => idToNode.containsKey(edge.fromNodeId))
         .where((edge) => idToNode.containsKey(edge.toNodeId))
         .take(_maxEdgeLines)

@@ -18,6 +18,14 @@ class AppSettings {
     this.maxLongQueue = 500,
     this.maxUltraQueue = 200,
     this.searchDepth = 2,
+    this.lruKeywordMatchWeight = 100,
+    this.lruEventEventWeight = 50,
+    this.lruEventBelongingKeywordWeight = 30,
+    this.lruEventBelongingNormalWeight = 10,
+    this.lruEventSettingKeywordWeight = 30,
+    this.lruEventSettingNormalWeight = 10,
+    this.vectorSimilarityWeight = 80,
+    this.keywordMatchWeight = 100,
   });
 
   /// Prompt 中列表项的最大数量
@@ -56,6 +64,30 @@ class AppSettings {
   /// 关联检索深度（邻居层级）
   final int searchDepth;
 
+  /// LRU权重：关键词匹配权重
+  final int lruKeywordMatchWeight;
+
+  /// LRU权重：事件-事件关联权重
+  final int lruEventEventWeight;
+
+  /// LRU权重：事件-物品关联（关键词相关）权重
+  final int lruEventBelongingKeywordWeight;
+
+  /// LRU权重：事件-物品关联（普通）权重
+  final int lruEventBelongingNormalWeight;
+
+  /// LRU权重：事件-设定关联（关键词相关）权重
+  final int lruEventSettingKeywordWeight;
+
+  /// LRU权重：事件-设定关联（普通）权重
+  final int lruEventSettingNormalWeight;
+
+  /// 向量相似度权重
+  final int vectorSimilarityWeight;
+
+  /// 关键词匹配权重
+  final int keywordMatchWeight;
+
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     return AppSettings(
       maxPromptListItems: (json['maxPromptListItems'] as num?)?.toInt() ?? 5,
@@ -70,6 +102,14 @@ class AppSettings {
       maxLongQueue: (json['maxLongQueue'] as num?)?.toInt() ?? 500,
       maxUltraQueue: (json['maxUltraQueue'] as num?)?.toInt() ?? 200,
       searchDepth: (json['searchDepth'] as num?)?.toInt() ?? 2,
+      lruKeywordMatchWeight: (json['lruKeywordMatchWeight'] as num?)?.toInt() ?? 100,
+      lruEventEventWeight: (json['lruEventEventWeight'] as num?)?.toInt() ?? 50,
+      lruEventBelongingKeywordWeight: (json['lruEventBelongingKeywordWeight'] as num?)?.toInt() ?? 30,
+      lruEventBelongingNormalWeight: (json['lruEventBelongingNormalWeight'] as num?)?.toInt() ?? 10,
+      lruEventSettingKeywordWeight: (json['lruEventSettingKeywordWeight'] as num?)?.toInt() ?? 30,
+      lruEventSettingNormalWeight: (json['lruEventSettingNormalWeight'] as num?)?.toInt() ?? 10,
+      vectorSimilarityWeight: (json['vectorSimilarityWeight'] as num?)?.toInt() ?? 80,
+      keywordMatchWeight: (json['keywordMatchWeight'] as num?)?.toInt() ?? 100,
     );
   }
 
@@ -87,6 +127,14 @@ class AppSettings {
       'maxLongQueue': maxLongQueue,
       'maxUltraQueue': maxUltraQueue,
       'searchDepth': searchDepth,
+      'lruKeywordMatchWeight': lruKeywordMatchWeight,
+      'lruEventEventWeight': lruEventEventWeight,
+      'lruEventBelongingKeywordWeight': lruEventBelongingKeywordWeight,
+      'lruEventBelongingNormalWeight': lruEventBelongingNormalWeight,
+      'lruEventSettingKeywordWeight': lruEventSettingKeywordWeight,
+      'lruEventSettingNormalWeight': lruEventSettingNormalWeight,
+      'vectorSimilarityWeight': vectorSimilarityWeight,
+      'keywordMatchWeight': keywordMatchWeight,
     };
   }
 
@@ -103,6 +151,14 @@ class AppSettings {
     int? maxLongQueue,
     int? maxUltraQueue,
     int? searchDepth,
+    int? lruKeywordMatchWeight,
+    int? lruEventEventWeight,
+    int? lruEventBelongingKeywordWeight,
+    int? lruEventBelongingNormalWeight,
+    int? lruEventSettingKeywordWeight,
+    int? lruEventSettingNormalWeight,
+    int? vectorSimilarityWeight,
+    int? keywordMatchWeight,
   }) {
     return AppSettings(
       maxPromptListItems: maxPromptListItems ?? this.maxPromptListItems,
@@ -117,6 +173,14 @@ class AppSettings {
       maxLongQueue: maxLongQueue ?? this.maxLongQueue,
       maxUltraQueue: maxUltraQueue ?? this.maxUltraQueue,
       searchDepth: searchDepth ?? this.searchDepth,
+      lruKeywordMatchWeight: lruKeywordMatchWeight ?? this.lruKeywordMatchWeight,
+      lruEventEventWeight: lruEventEventWeight ?? this.lruEventEventWeight,
+      lruEventBelongingKeywordWeight: lruEventBelongingKeywordWeight ?? this.lruEventBelongingKeywordWeight,
+      lruEventBelongingNormalWeight: lruEventBelongingNormalWeight ?? this.lruEventBelongingNormalWeight,
+      lruEventSettingKeywordWeight: lruEventSettingKeywordWeight ?? this.lruEventSettingKeywordWeight,
+      lruEventSettingNormalWeight: lruEventSettingNormalWeight ?? this.lruEventSettingNormalWeight,
+      vectorSimilarityWeight: vectorSimilarityWeight ?? this.vectorSimilarityWeight,
+      keywordMatchWeight: keywordMatchWeight ?? this.keywordMatchWeight,
     );
   }
 }

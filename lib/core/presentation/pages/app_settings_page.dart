@@ -253,6 +253,88 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
               _settings = _settings.copyWith(searchDepth: v);
             }),
           ),
+          _buildSectionTitle('LRU 权重设置'),
+          _buildNumberSetting(
+            title: '关键词匹配权重',
+            subtitle: '事件与用户输入关键词匹配的权重（默认: 100）',
+            value: _settings.lruKeywordMatchWeight,
+            min: 1,
+            max: 500,
+            onChanged: (v) => setState(() {
+              _settings = _settings.copyWith(lruKeywordMatchWeight: v);
+            }),
+          ),
+          _buildNumberSetting(
+            title: '事件-事件关联权重',
+            subtitle: '与关键词匹配事件相关联的事件权重（默认: 50）',
+            value: _settings.lruEventEventWeight,
+            min: 1,
+            max: 300,
+            onChanged: (v) => setState(() {
+              _settings = _settings.copyWith(lruEventEventWeight: v);
+            }),
+          ),
+          _buildNumberSetting(
+            title: '事件-物品关联（关键词相关）权重',
+            subtitle: '与关键词相关的物品关联事件权重（默认: 30）',
+            value: _settings.lruEventBelongingKeywordWeight,
+            min: 1,
+            max: 200,
+            onChanged: (v) => setState(() {
+              _settings = _settings.copyWith(lruEventBelongingKeywordWeight: v);
+            }),
+          ),
+          _buildNumberSetting(
+            title: '事件-物品关联（普通）权重',
+            subtitle: '普通物品关联事件权重（默认: 10）',
+            value: _settings.lruEventBelongingNormalWeight,
+            min: 1,
+            max: 100,
+            onChanged: (v) => setState(() {
+              _settings = _settings.copyWith(lruEventBelongingNormalWeight: v);
+            }),
+          ),
+          _buildNumberSetting(
+            title: '事件-设定关联（关键词相关）权重',
+            subtitle: '与关键词相关的设定关联事件权重（默认: 30）',
+            value: _settings.lruEventSettingKeywordWeight,
+            min: 1,
+            max: 200,
+            onChanged: (v) => setState(() {
+              _settings = _settings.copyWith(lruEventSettingKeywordWeight: v);
+            }),
+          ),
+          _buildNumberSetting(
+            title: '事件-设定关联（普通）权重',
+            subtitle: '普通设定关联事件权重（默认: 10）',
+            value: _settings.lruEventSettingNormalWeight,
+            min: 1,
+            max: 100,
+            onChanged: (v) => setState(() {
+              _settings = _settings.copyWith(lruEventSettingNormalWeight: v);
+            }),
+          ),
+          _buildSectionTitle('搜索权重设置'),
+          _buildNumberSetting(
+            title: '向量相似度权重',
+            subtitle: '向量数据库相似度匹配的权重（默认: 80）',
+            value: _settings.vectorSimilarityWeight,
+            min: 1,
+            max: 300,
+            onChanged: (v) => setState(() {
+              _settings = _settings.copyWith(vectorSimilarityWeight: v);
+            }),
+          ),
+          _buildNumberSetting(
+            title: '关键词匹配权重',
+            subtitle: '关键词精确匹配的权重（默认: 100）',
+            value: _settings.keywordMatchWeight,
+            min: 1,
+            max: 300,
+            onChanged: (v) => setState(() {
+              _settings = _settings.copyWith(keywordMatchWeight: v);
+            }),
+          ),
           const SizedBox(height: 32),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),

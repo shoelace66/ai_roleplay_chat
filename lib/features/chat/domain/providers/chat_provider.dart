@@ -281,7 +281,7 @@ class ChatProvider extends ChangeNotifier {
   }
 
   /// 刷新连接状态
-  /// 
+  ///
   /// 手动触发重新连接检查
   void refreshConnection() {
     _heartbeat.markReconnecting();
@@ -675,6 +675,13 @@ class ChatProvider extends ChangeNotifier {
   /// 6. 更新联系人记忆（memoryPatch）
   /// 7. 触发事件总结（如达到阈值）
   Future<void> sendMessage(String rawInput) async {
+    // 检查API Key是否已设置
+    if (_apiKey.isEmpty) {
+      error = '请先设置 API Key';
+      notifyListeners();
+      return;
+    }
+
     final selected = selectedContact;
     if (selected == null) {
       error = AppStrings.noContact;
@@ -780,8 +787,9 @@ class ChatProvider extends ChangeNotifier {
       _updateMessageStatus(selected.id, userMessage.id, MessageStatus.sent);
 
       // 步骤6: 提取回复内容（从JSON中提取reply字段）
-      final replyContent = StructuredOutputRegexParser.extractReply(reply.content);
-      
+      final replyContent =
+          StructuredOutputRegexParser.extractReply(reply.content);
+
       // 检查是否成功提取到回复内容
       if (replyContent == null) {
         // 如果提取失败，可能是AI返回了错误消息
@@ -789,7 +797,7 @@ class ChatProvider extends ChangeNotifier {
         _updateMessageStatus(selected.id, userMessage.id, MessageStatus.failed);
         return;
       }
-      
+
       currentList.add(
         Message(
           id: reply.id,
@@ -905,7 +913,7 @@ class ChatProvider extends ChangeNotifier {
       turnCount: contact.eventGraph.turnCount + 1,
       belongingEventQueues: const <String, List<String>>{},
       settingEventQueues: const <String, List<String>>{},
-      edges: const <EventEdge>[],
+      edges: const <String, EventEdge>{},
     );
 
     // 将新事件加入短期队列
@@ -925,11 +933,12 @@ class ChatProvider extends ChangeNotifier {
     // 各层级固定输入LLM的事件不参与LRU排序
     graph = _applyLruToAllQueues(graph, userInput: userInput);
 
-    // 更新物品关联和边关系
+    // 更新物品关联和边关系（应用LRU排序）
     graph = _applyBelongingQueuesAndEdges(
       graph: graph,
       eventNodeId: currentEventNodeId,
       patch: patchBelongings,
+      userInput: userInput,
     );
 
     // 更新设定关联和边关系
@@ -1058,7 +1067,7 @@ class ChatProvider extends ChangeNotifier {
 
     // 建立边关系（总结事件指向被总结事件）
     final edgeMap = <String, EventEdge>{
-      for (final e in out.edges) e.toUniqueKey(): e
+      ...out.edges,
     };
     for (final s in sources) {
       final edge = EventEdge(fromNodeId: summaryNode.id, toNodeId: s.id);
@@ -1067,7 +1076,7 @@ class ChatProvider extends ChangeNotifier {
 
     // 标记被总结事件并返回更新后的图
     return _markNodesSummarized(
-      out.copyWith(edges: edgeMap.values.toList()),
+      out.copyWith(edges: edgeMap),
       sourceTier: source,
       sourceNodeIds: sources.map((e) => e.id).toSet(),
     );
@@ -1383,7 +1392,7 @@ class ChatProvider extends ChangeNotifier {
 
     // 构建邻接表（event-event边）
     final adjacent = <String, Set<String>>{};
-    for (final edge in graph.edges) {
+    for (final edge in graph.edges.values) {
       if (allNodes.containsKey(edge.fromNodeId) &&
           allNodes.containsKey(edge.toNodeId)) {
         adjacent
@@ -1395,6 +1404,9 @@ class ChatProvider extends ChangeNotifier {
       }
     }
 
+    // 获取LRU权重设置
+    final settings = appSettings;
+
     // 计算每个节点的LRU分数
     final scores = <String, int>{};
     for (final node in events) {
@@ -1404,7 +1416,7 @@ class ChatProvider extends ChangeNotifier {
       final nodeKeywords =
           _extractLocalKeywords(node.event.toSearchableText()).toSet();
       final keywordMatches = keywords.intersection(nodeKeywords).length;
-      score += keywordMatches * 100;
+      score += keywordMatches * settings.lruKeywordMatchWeight;
 
       // 2. 检查是否有event-event关联（与被关键词匹配的事件相连）
       final neighbors = adjacent[node.id] ?? const <String>{};
@@ -1414,7 +1426,7 @@ class ChatProvider extends ChangeNotifier {
         final neighborKeywords =
             _extractLocalKeywords(neighbor.event.toSearchableText()).toSet();
         if (keywords.intersection(neighborKeywords).isNotEmpty) {
-          score += 50;
+          score += settings.lruEventEventWeight;
           break;
         }
       }
@@ -1425,9 +1437,9 @@ class ChatProvider extends ChangeNotifier {
         if (queue.contains(node.id)) {
           final belongingKeywords = _extractLocalKeywords(entry.key).toSet();
           if (keywords.intersection(belongingKeywords).isNotEmpty) {
-            score += 30;
+            score += settings.lruEventBelongingKeywordWeight;
           } else {
-            score += 10;
+            score += settings.lruEventBelongingNormalWeight;
           }
           break;
         }
@@ -1439,9 +1451,9 @@ class ChatProvider extends ChangeNotifier {
         if (queue.contains(node.id)) {
           final settingKeywords = _extractLocalKeywords(entry.key).toSet();
           if (keywords.intersection(settingKeywords).isNotEmpty) {
-            score += 30;
+            score += settings.lruEventSettingKeywordWeight;
           } else {
-            score += 10;
+            score += settings.lruEventSettingNormalWeight;
           }
           break;
         }
@@ -1551,29 +1563,64 @@ class ChatProvider extends ChangeNotifier {
 
   // ==================== 事件图操作辅助方法 ====================
 
-  /// 应用物品队列和边关系更新
+  /// 应用物品队列和边关系更新（全局LRU管理）
   ///
   /// 当物品被标记为新增或提及时：
   /// 1. 将当前事件ID加入物品的关联队列
-  /// 2. 在物品节点和事件节点之间建立边
+  /// 2. 对队列应用LRU排序（基于事件与当前输入的相关性）
+  /// 3. 在物品节点和事件节点之间建立边
+  ///
+  /// LRU规则：
+  /// - 与当前用户输入关键词匹配的事件排在前面
+  /// - 与关键词匹配事件有关联的排在前面
+  /// - 其他事件按时间倒序
   EventGraphMemory _applyBelongingQueuesAndEdges({
     required EventGraphMemory graph,
     required String? eventNodeId,
     required List<_BelongingPatchItem> patch,
+    required String userInput,
   }) {
     if (patch.isEmpty || eventNodeId == null || eventNodeId.isEmpty) {
       return graph;
     }
+
+    // 提取用户输入关键词用于LRU排序
+    final keywords = _extractLocalKeywords(userInput).toSet();
+
+    // 构建节点ID到节点的映射
+    final allNodes = <String, EventNode>{
+      for (final node in graph.shortTermQueue) node.id: node,
+      for (final node in graph.longTermQueue) node.id: node,
+      for (final node in graph.ultraLongTermQueue) node.id: node,
+    };
+
     final queues = <String, List<String>>{
       for (final e in graph.belongingEventQueues.entries)
         e.key: List<String>.from(e.value),
     };
     var out = graph;
+
     for (final item in patch) {
-      final queue = queues.putIfAbsent(item.name, () => <String>[]);
+      // 获取或创建队列
+      var queue = queues.putIfAbsent(item.name, () => <String>[]);
+
+      // 添加新事件ID
       queue.add(eventNodeId);
-      // 限制队列长度
-      if (queue.length > 100) queue.removeRange(0, queue.length - 100);
+
+      // 对队列应用LRU排序
+      queue = _sortBelongingQueueByLru(
+        queue,
+        allNodes: allNodes,
+        keywords: keywords,
+      );
+
+      // 限制队列长度（保留最相关的100个）
+      if (queue.length > 100) {
+        queue = queue.sublist(0, 100);
+      }
+
+      queues[item.name] = queue;
+
       // 建立边关系
       out = _appendEdge(
         out,
@@ -1581,13 +1628,65 @@ class ChatProvider extends ChangeNotifier {
         toNodeId: eventNodeId,
       );
     }
+
     return out.copyWith(belongingEventQueues: queues);
   }
 
-  /// 应用设定关联队列和边关系
+  /// 对belonging队列应用LRU排序
+  ///
+  /// 排序规则：
+  /// 1. 与关键词匹配的事件（权重100）
+  /// 2. 其他事件按时间倒序（新的在前）
+  List<String> _sortBelongingQueueByLru(
+    List<String> queue, {
+    required Map<String, EventNode> allNodes,
+    required Set<String> keywords,
+  }) {
+    if (queue.isEmpty || keywords.isEmpty) return queue;
+
+    // 计算每个事件ID的LRU分数
+    final scores = <String, int>{};
+
+    for (final eventId in queue) {
+      final node = allNodes[eventId];
+      if (node == null) {
+        scores[eventId] = 0;
+        continue;
+      }
+
+      var score = 0;
+
+      // 检查是否与用户输入关键词匹配
+      final nodeKeywords =
+          _extractLocalKeywords(node.event.toSearchableText()).toSet();
+      final keywordMatches = keywords.intersection(nodeKeywords).length;
+      score += keywordMatches * 100;
+
+      // 加上时间戳作为次要排序依据（新的在前）
+      score += (node.createdAtMs ~/ 1000000);
+
+      scores[eventId] = score;
+    }
+
+    // 按分数降序排序
+    final sorted = List<String>.from(queue);
+    sorted.sort((a, b) {
+      final scoreA = scores[a] ?? 0;
+      final scoreB = scores[b] ?? 0;
+      return scoreB.compareTo(scoreA);
+    });
+
+    return sorted;
+  }
+
+  /// 应用设定关联队列和边关系（全局LRU管理）
   ///
   /// 根据用户输入中的关键词，匹配 contact.settings 中的设定，
-  /// 建立 setting-event 关联，类似于 belongings 的处理方式
+  /// 建立 setting-event 关联，并对队列应用LRU排序
+  ///
+  /// LRU规则：
+  /// - 与当前用户输入关键词匹配的事件排在前面
+  /// - 其他事件按时间倒序（新的在前）
   EventGraphMemory _applySettingQueuesAndEdges({
     required EventGraphMemory graph,
     required String? eventNodeId,
@@ -1604,6 +1703,13 @@ class ChatProvider extends ChangeNotifier {
     // 提取用户输入中的关键词
     final inputKeywords = _extractLocalKeywords(userInput).toSet();
     if (inputKeywords.isEmpty) return graph;
+
+    // 构建节点ID到节点的映射
+    final allNodes = <String, EventNode>{
+      for (final node in graph.shortTermQueue) node.id: node,
+      for (final node in graph.longTermQueue) node.id: node,
+      for (final node in graph.ultraLongTermQueue) node.id: node,
+    };
 
     final queues = <String, List<String>>{
       for (final e in graph.settingEventQueues.entries)
@@ -1627,11 +1733,26 @@ class ChatProvider extends ChangeNotifier {
 
       // 检查是否有关键词匹配
       if (inputKeywords.intersection(settingKeywords).isNotEmpty) {
-        // 建立 setting-event 关联
-        final queue = queues.putIfAbsent(key, () => <String>[]);
+        // 获取或创建队列
+        var queue = queues.putIfAbsent(key, () => <String>[]);
+
+        // 添加新事件ID
         queue.add(eventNodeId);
-        // 限制队列长度
-        if (queue.length > 100) queue.removeRange(0, queue.length - 100);
+
+        // 对队列应用LRU排序
+        queue = _sortBelongingQueueByLru(
+          queue,
+          allNodes: allNodes,
+          keywords: inputKeywords,
+        );
+
+        // 限制队列长度（保留最相关的100个）
+        if (queue.length > 100) {
+          queue = queue.sublist(0, 100);
+        }
+
+        queues[key] = queue;
+
         // 建立边关系
         out = _appendEdge(
           out,
@@ -1720,10 +1841,10 @@ class ChatProvider extends ChangeNotifier {
     if (fromNodeId.trim().isEmpty || toNodeId.trim().isEmpty) return graph;
     final edge = EventEdge(fromNodeId: fromNodeId, toNodeId: toNodeId);
     final edgeMap = <String, EventEdge>{
-      for (final e in graph.edges) e.toUniqueKey(): e,
+      ...graph.edges,
       edge.toUniqueKey(): edge,
     };
-    return graph.copyWith(edges: edgeMap.values.toList());
+    return graph.copyWith(edges: edgeMap);
   }
 
   /// 标记节点为已总结

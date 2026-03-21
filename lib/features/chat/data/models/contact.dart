@@ -312,7 +312,7 @@ class EventGraphMemory {
     this.knowledgeNodes = const <KnowledgeNode>[],
     this.belongingEventQueues = const <String, List<String>>{},
     this.settingEventQueues = const <String, List<String>>{},
-    this.edges = const <EventEdge>[],
+    this.edges = const <String, EventEdge>{},
     this.turnCount = 0,
   });
 
@@ -322,7 +322,7 @@ class EventGraphMemory {
   final List<KnowledgeNode> knowledgeNodes;
   final Map<String, List<String>> belongingEventQueues;
   final Map<String, List<String>> settingEventQueues;
-  final List<EventEdge> edges;
+  final Map<String, EventEdge> edges;
   final int turnCount;
 
   factory EventGraphMemory.fromJson(Map<String, dynamic> json) {
@@ -334,23 +334,29 @@ class EventGraphMemory {
       belongingEventQueues:
           _readBelongingEventQueues(json['belongingEventQueues']),
       settingEventQueues: _readBelongingEventQueues(json['settingEventQueues']),
-      edges: _readEventEdgeList(json['edges']),
+      edges: _readEventEdgeMap(json['edges']),
       turnCount:
           (json['turnCount'] is num) ? (json['turnCount'] as num).toInt() : 0,
     );
   }
 
   Map<String, dynamic> toJson() {
-    return <String, dynamic>{
+    final json = <String, dynamic>{
       'shortTermQueue': shortTermQueue.map((e) => e.toJson()).toList(),
       'longTermQueue': longTermQueue.map((e) => e.toJson()).toList(),
       'ultraLongTermQueue': ultraLongTermQueue.map((e) => e.toJson()).toList(),
       'knowledgeNodes': knowledgeNodes.map((e) => e.toJson()).toList(),
       'belongingEventQueues': belongingEventQueues,
       'settingEventQueues': settingEventQueues,
-      'edges': edges.map((e) => e.toJson()).toList(),
       'turnCount': turnCount,
     };
+
+    // 只存储非空字段
+    if (edges.isNotEmpty) {
+      json['edges'] = edges.values.map((e) => e.toJson()).toList();
+    }
+
+    return json;
   }
 
   EventGraphMemory copyWith({
@@ -360,7 +366,7 @@ class EventGraphMemory {
     List<KnowledgeNode>? knowledgeNodes,
     Map<String, List<String>>? belongingEventQueues,
     Map<String, List<String>>? settingEventQueues,
-    List<EventEdge>? edges,
+    Map<String, EventEdge>? edges,
     int? turnCount,
   }) {
     return EventGraphMemory(
@@ -386,7 +392,8 @@ class EventGraphMemory {
     ];
   }
 
-  List<EventMemory> relatedEventsForPrompt(String userInput, {int maxResults = 5}) {
+  List<EventMemory> relatedEventsForPrompt(String userInput,
+      {int maxResults = 5}) {
     final keywords = _extractKeywords(userInput);
     if (keywords.isEmpty) return const <EventMemory>[];
 
@@ -399,11 +406,22 @@ class EventGraphMemory {
 
     final scored = <_ScoredNode>[];
     for (final node in allNodes) {
-      final score = _keywordHitCount(
+      // 关键词匹配分数
+      final keywordScore = _keywordHitCount(
         keywords,
         _extractKeywords(node.event.toSearchableText()),
       );
-      if (score > 0) scored.add(_ScoredNode(node: node, score: score));
+
+      // 语义相似度分数（简化版）
+      final semanticScore = _calculateSemanticSimilarity(
+          userInput, node.event.toSearchableText());
+
+      // 综合分数
+      final totalScore = keywordScore * 0.6 + semanticScore * 0.4;
+
+      if (totalScore > 0) {
+        scored.add(_ScoredNode(node: node, score: totalScore));
+      }
     }
     scored.sort((a, b) {
       if (a.score != b.score) return b.score.compareTo(a.score);
@@ -412,7 +430,7 @@ class EventGraphMemory {
 
     final idToNode = <String, EventNode>{for (final n in allNodes) n.id: n};
     final adjacent = <String, Set<String>>{};
-    for (final edge in edges) {
+    for (final edge in edges.values) {
       adjacent
           .putIfAbsent(edge.fromNodeId, () => <String>{})
           .add(edge.toNodeId);
@@ -440,7 +458,8 @@ class EventGraphMemory {
 
     final scoredBelongings = <_ScoredBelonging>[];
     for (final key in belongingEventQueues.keys) {
-      final score = _keywordHitCount(keywords, _extractKeywords(key));
+      final score = _keywordHitCount(keywords, _extractKeywords(key)) * 0.6 +
+          _calculateSemanticSimilarity(userInput, key) * 0.4;
       if (score > 0) {
         scoredBelongings.add(_ScoredBelonging(name: key, score: score));
       }
@@ -459,7 +478,8 @@ class EventGraphMemory {
     // 搜索 settingEventQueues（类似 belongings 的搜索逻辑）
     final scoredSettings = <_ScoredSetting>[];
     for (final key in settingEventQueues.keys) {
-      final score = _keywordHitCount(keywords, _extractKeywords(key));
+      final score = _keywordHitCount(keywords, _extractKeywords(key)) * 0.6 +
+          _calculateSemanticSimilarity(userInput, key) * 0.4;
       if (score > 0) {
         scoredSettings.add(_ScoredSetting(key: key, score: score));
       }
@@ -476,6 +496,22 @@ class EventGraphMemory {
     }
 
     return result.take(maxResults).toList();
+  }
+
+  double _calculateSemanticSimilarity(String text1, String text2) {
+    // 简化的语义相似度计算
+    // 实际项目中可以使用向量存储服务
+    final words1 = _extractKeywords(text1);
+    final words2 = _extractKeywords(text2);
+
+    if (words1.isEmpty || words2.isEmpty) return 0.0;
+
+    // 计算重叠词的比例
+    final intersection = words1.intersection(words2).length;
+    final union = words1.union(words2).length;
+
+    // 计算Jaccard相似度
+    return intersection / union.toDouble();
   }
 
   static int _keywordHitCount(Set<String> lhs, Set<String> rhs) {
@@ -502,19 +538,19 @@ class EventGraphMemory {
 class _ScoredNode {
   const _ScoredNode({required this.node, required this.score});
   final EventNode node;
-  final int score;
+  final double score;
 }
 
 class _ScoredBelonging {
   const _ScoredBelonging({required this.name, required this.score});
   final String name;
-  final int score;
+  final double score;
 }
 
 class _ScoredSetting {
   const _ScoredSetting({required this.key, required this.score});
   final String key;
-  final int score;
+  final double score;
 }
 
 class Contact {
@@ -593,28 +629,45 @@ class Contact {
   }
 
   Map<String, dynamic> toJson() {
-    return <String, dynamic>{
+    final json = <String, dynamic>{
       'id': id,
       'name': name,
-      'avatar': avatar,
       'category': category.name,
-      'personality': personality,
-      'appearance': appearance,
-      'personalInfo': personalInfo,
-      'settings': settings,
-      'backgroundStory': backgroundStory,
-      'worldKnowledge': worldKnowledge.items,
-      'selfKnowledge': selfKnowledge.items,
-      'userKnowledge': userKnowledge.items,
-      'events': events.items.map((e) => e.toJson()).toList(),
-      'eventGraph': eventGraph.toJson(),
-      'belongings': belongings,
-      'status': status,
-      'mood': mood,
-      'time': time,
       'createdAt': createdAt.toIso8601String(),
       'createdAtMs': createdAt.millisecondsSinceEpoch,
     };
+
+    // 只存储非空字段
+    if (avatar.isNotEmpty) json['avatar'] = avatar;
+    if (personality.isNotEmpty) json['personality'] = personality;
+    if (appearance.isNotEmpty) json['appearance'] = appearance;
+    if (personalInfo.isNotEmpty) json['personalInfo'] = personalInfo;
+    if (settings.isNotEmpty) json['settings'] = settings;
+    if (backgroundStory.isNotEmpty) json['backgroundStory'] = backgroundStory;
+    if (worldKnowledge.items.isNotEmpty)
+      json['worldKnowledge'] = worldKnowledge.items;
+    if (selfKnowledge.items.isNotEmpty)
+      json['selfKnowledge'] = selfKnowledge.items;
+    if (userKnowledge.items.isNotEmpty)
+      json['userKnowledge'] = userKnowledge.items;
+    if (events.items.isNotEmpty)
+      json['events'] = events.items.map((e) => e.toJson()).toList();
+    if (eventGraph.shortTermQueue.isNotEmpty ||
+        eventGraph.longTermQueue.isNotEmpty ||
+        eventGraph.ultraLongTermQueue.isNotEmpty ||
+        eventGraph.knowledgeNodes.isNotEmpty ||
+        eventGraph.belongingEventQueues.isNotEmpty ||
+        eventGraph.settingEventQueues.isNotEmpty ||
+        eventGraph.edges.isNotEmpty ||
+        eventGraph.turnCount > 0) {
+      json['eventGraph'] = eventGraph.toJson();
+    }
+    if (belongings.isNotEmpty) json['belongings'] = belongings;
+    if (status.isNotEmpty) json['status'] = status;
+    if (mood.isNotEmpty) json['mood'] = mood;
+    if (time.isNotEmpty) json['time'] = time;
+
+    return json;
   }
 }
 
@@ -750,6 +803,20 @@ List<EventEdge> _readEventEdgeList(dynamic value) {
     }
     if (!seen.add(edge.toUniqueKey())) continue;
     out.add(edge);
+  }
+  return out;
+}
+
+Map<String, EventEdge> _readEventEdgeMap(dynamic value) {
+  if (value is! List) return const <String, EventEdge>{};
+  final out = <String, EventEdge>{};
+  for (final item in value) {
+    if (item is! Map) continue;
+    final edge = EventEdge.fromJson(_asMap(item));
+    if (edge.fromNodeId.trim().isEmpty || edge.toNodeId.trim().isEmpty) {
+      continue;
+    }
+    out[edge.toUniqueKey()] = edge;
   }
   return out;
 }
