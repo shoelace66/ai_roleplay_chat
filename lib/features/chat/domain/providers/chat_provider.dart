@@ -8,6 +8,7 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../core/data/models/app_settings.dart';
 import '../../../../core/utils/structured_input_prompt_composer.dart';
 import '../../../../core/utils/structured_output_regex_parser.dart';
+import '../../../../core/utils/vector_memory_service.dart';
 import '../../../../infrastructure/services/ai_service.dart';
 import '../../data/datasources/chat_local_storage.dart';
 import '../../data/models/contact.dart';
@@ -126,6 +127,11 @@ class ChatProvider extends ChangeNotifier {
   /// 使用SharedPreferences存储联系人、消息历史、API设置等
   final ChatAgentStore _agentStore;
 
+  /// 向量记忆服务
+  ///
+  /// 用于存储和搜索向量嵌入的记忆
+  final VectorMemoryService _vectorMemory = VectorMemoryService();
+
   // ==================== 状态数据 ====================
 
   /// 联系人列表
@@ -223,6 +229,9 @@ class ChatProvider extends ChangeNotifier {
   ///
   /// 如果联系人列表为空，自动创建一个演示联系人
   Future<void> initialize() async {
+    // 初始化向量记忆服务
+    await _vectorMemory.initialize();
+
     // 加载Agent设置
     final settings = await _agentStore.readAgentSettings();
     _apiKey = (settings['apiKey'] ?? '').toString();
@@ -730,6 +739,11 @@ class ChatProvider extends ChangeNotifier {
             : keywords.mergedKeywords,
       );
 
+      // 向量搜索相关记忆
+      final similarMemories =
+          await _vectorMemory.searchSimilar(query, 3, // 取前3个最相似的记忆
+              type: 'message');
+
       // 步骤2: 构建Prompt联系人（包含筛选后的事件和知识）
       final promptContact =
           _buildPromptContact(currentContact, userInput: query);
@@ -768,6 +782,7 @@ class ChatProvider extends ChangeNotifier {
                 '合并(JSON): ${jsonEncode({
                   "keywords": keywords.mergedKeywords
                 })}\n\n'
+                '【调试信息】向量搜索结果\n${similarMemories.map((m) => '${m.score.toStringAsFixed(2)}: ${m.content}').join('\n')}\n\n'
                 '【调试信息】完整 Prompt\n$structured',
             createdAt: DateTime.now(),
           ),
@@ -826,6 +841,10 @@ class ChatProvider extends ChangeNotifier {
       _updateMessageStatus(selected.id, userMessage.id, MessageStatus.failed);
       _heartbeat.markReconnecting();
     } finally {
+      // 将消息添加到向量数据库
+      await _vectorMemory.addMemoryEntry(
+          userMessage.id, userMessage.content, 'message');
+
       isLoading = false;
       isTyping = false;
       notifyListeners();
