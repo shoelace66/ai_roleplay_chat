@@ -744,6 +744,16 @@ class ChatProvider extends ChangeNotifier {
           await _vectorMemory.searchSimilar(query, 3, // 取前3个最相似的记忆
               type: 'message');
 
+      // 应用向量相似度权重
+      final weightedMemories = similarMemories.map((memory) {
+        final weightedScore =
+            memory.score * (_appSettings.vectorSimilarityWeight / 100);
+        return _ScoredMemory(memory: memory, score: weightedScore);
+      }).toList();
+
+      // 按加权分数排序
+      weightedMemories.sort((a, b) => b.score.compareTo(a.score));
+
       // 步骤2: 构建Prompt联系人（包含筛选后的事件和知识）
       final promptContact =
           _buildPromptContact(currentContact, userInput: query);
@@ -782,7 +792,7 @@ class ChatProvider extends ChangeNotifier {
                 '合并(JSON): ${jsonEncode({
                   "keywords": keywords.mergedKeywords
                 })}\n\n'
-                '【调试信息】向量搜索结果\n${similarMemories.map((m) => '${m.score.toStringAsFixed(2)}: ${m.content}').join('\n')}\n\n'
+                '【调试信息】向量搜索结果\n${weightedMemories.map((m) => '${m.score.toStringAsFixed(2)}: ${m.memory.content}').join('\n')}\n\n'
                 '【调试信息】完整 Prompt\n$structured',
             createdAt: DateTime.now(),
           ),
@@ -2184,4 +2194,12 @@ class _BelongingPatchItem {
 
   /// 物品名称
   final String name;
+}
+
+/// ��Ȩ������
+class _ScoredMemory {
+  final VectorEntry memory;
+  final double score;
+
+  _ScoredMemory({required this.memory, required this.score});
 }
