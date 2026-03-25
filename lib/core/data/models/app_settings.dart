@@ -1,0 +1,202 @@
+/// 应用设置数据模型
+///
+/// 存储各种限长参数，包括：
+/// - 输入到 LLM 的长度限制
+/// - 本地存储的长度限制
+/// - 关联检索的深度和长度
+class AppSettings {
+  const AppSettings({
+    this.maxPromptListItems = 5,
+    this.maxPromptLineLength = 200,
+    this.maxEdgeLines = 20,
+    this.maxShortTermEvents = 10,
+    this.maxLongTermEvents = 5,
+    this.maxUltraTermEvents = 2,
+    this.maxRelatedEvents = 5,
+    this.summaryThreshold = 10,
+    this.maxShortQueue = 2000,
+    this.maxLongQueue = 500,
+    this.maxUltraQueue = 200,
+    this.searchDepth = 2,
+    this.comprehensiveKeywordWeight = 60,
+    this.comprehensiveSemanticWeight = 40,
+    this.lruKeywordMatchWeight = 100,
+    this.lruEventEventWeight = 50,
+    this.lruEventBelongingKeywordWeight = 30,
+    this.lruEventBelongingNormalWeight = 10,
+    this.lruEventSettingKeywordWeight = 30,
+    this.lruEventSettingNormalWeight = 10,
+    this.vectorSimilarityWeight = 80,
+    this.keywordMatchWeight = 100,
+  });
+
+  /// Prompt 中列表项的最大数量
+  final int maxPromptListItems;
+
+  /// Prompt 中单行的最大长度
+  final int maxPromptLineLength;
+
+  /// Prompt 中边关系的最大行数
+  final int maxEdgeLines;
+
+  /// 输入 LLM 的短期事件数量
+  final int maxShortTermEvents;
+
+  /// 输入 LLM 的长期事件数量
+  final int maxLongTermEvents;
+
+  /// 输入 LLM 的超长期事件数量
+  final int maxUltraTermEvents;
+
+  /// 关联检索返回的最大事件数
+  final int maxRelatedEvents;
+
+  /// 事件总结阈值
+  final int summaryThreshold;
+
+  /// 短期队列最大容量（本地存储）
+  final int maxShortQueue;
+
+  /// 长期队列最大容量（本地存储）
+  final int maxLongQueue;
+
+  /// 超长期队列最大容量（本地存储）
+  final int maxUltraQueue;
+
+  /// 关联检索深度（邻居层级）
+  final int searchDepth;
+
+  /// 综合搜索权重：关键词匹配权重（百分比，默认 60）
+  final int comprehensiveKeywordWeight;
+
+  /// 综合搜索权重：语义相似度权重（百分比，默认 40）
+  final int comprehensiveSemanticWeight;
+
+  /// LRU 权重：关键词匹配权重
+  final int lruKeywordMatchWeight;
+
+  /// LRU权重：事件-事件关联权重
+  final int lruEventEventWeight;
+
+  /// LRU权重：事件-物品关联（关键词相关）权重
+  final int lruEventBelongingKeywordWeight;
+
+  /// LRU权重：事件-物品关联（普通）权重
+  final int lruEventBelongingNormalWeight;
+
+  /// LRU权重：事件-设定关联（关键词相关）权重
+  final int lruEventSettingKeywordWeight;
+
+  /// LRU权重：事件-设定关联（普通）权重
+  final int lruEventSettingNormalWeight;
+
+  /// 向量相似度权重
+  final int vectorSimilarityWeight;
+
+  /// 关键词匹配权重
+  final int keywordMatchWeight;
+
+  factory AppSettings.fromJson(Map<String, dynamic> json) {
+    return AppSettings(
+      maxPromptListItems: (json['maxPromptListItems'] as num?)?.toInt() ?? 5,
+      maxPromptLineLength: (json['maxPromptLineLength'] as num?)?.toInt() ?? 200,
+      maxEdgeLines: (json['maxEdgeLines'] as num?)?.toInt() ?? 20,
+      maxShortTermEvents: (json['maxShortTermEvents'] as num?)?.toInt() ?? 10,
+      maxLongTermEvents: (json['maxLongTermEvents'] as num?)?.toInt() ?? 5,
+      maxUltraTermEvents: (json['maxUltraTermEvents'] as num?)?.toInt() ?? 2,
+      maxRelatedEvents: (json['maxRelatedEvents'] as num?)?.toInt() ?? 5,
+      summaryThreshold: (json['summaryThreshold'] as num?)?.toInt() ?? 10,
+      maxShortQueue: (json['maxShortQueue'] as num?)?.toInt() ?? 2000,
+      maxLongQueue: (json['maxLongQueue'] as num?)?.toInt() ?? 500,
+      maxUltraQueue: (json['maxUltraQueue'] as num?)?.toInt() ?? 200,
+      searchDepth: (json['searchDepth'] as num?)?.toInt() ?? 2,
+      comprehensiveKeywordWeight: (json['comprehensiveKeywordWeight'] as num?)?.toInt() ?? 60,
+      comprehensiveSemanticWeight: (json['comprehensiveSemanticWeight'] as num?)?.toInt() ?? 40,
+      lruKeywordMatchWeight: (json['lruKeywordMatchWeight'] as num?)?.toInt() ?? 100,
+      lruEventEventWeight: (json['lruEventEventWeight'] as num?)?.toInt() ?? 50,
+      lruEventBelongingKeywordWeight: (json['lruEventBelongingKeywordWeight'] as num?)?.toInt() ?? 30,
+      lruEventBelongingNormalWeight: (json['lruEventBelongingNormalWeight'] as num?)?.toInt() ?? 10,
+      lruEventSettingKeywordWeight: (json['lruEventSettingKeywordWeight'] as num?)?.toInt() ?? 30,
+      lruEventSettingNormalWeight: (json['lruEventSettingNormalWeight'] as num?)?.toInt() ?? 10,
+      vectorSimilarityWeight: (json['vectorSimilarityWeight'] as num?)?.toInt() ?? 80,
+      keywordMatchWeight: (json['keywordMatchWeight'] as num?)?.toInt() ?? 100,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'maxPromptListItems': maxPromptListItems,
+      'maxPromptLineLength': maxPromptLineLength,
+      'maxEdgeLines': maxEdgeLines,
+      'maxShortTermEvents': maxShortTermEvents,
+      'maxLongTermEvents': maxLongTermEvents,
+      'maxUltraTermEvents': maxUltraTermEvents,
+      'maxRelatedEvents': maxRelatedEvents,
+      'summaryThreshold': summaryThreshold,
+      'maxShortQueue': maxShortQueue,
+      'maxLongQueue': maxLongQueue,
+      'maxUltraQueue': maxUltraQueue,
+      'searchDepth': searchDepth,
+      'comprehensiveKeywordWeight': comprehensiveKeywordWeight,
+      'comprehensiveSemanticWeight': comprehensiveSemanticWeight,
+      'lruKeywordMatchWeight': lruKeywordMatchWeight,
+      'lruEventEventWeight': lruEventEventWeight,
+      'lruEventBelongingKeywordWeight': lruEventBelongingKeywordWeight,
+      'lruEventBelongingNormalWeight': lruEventBelongingNormalWeight,
+      'lruEventSettingKeywordWeight': lruEventSettingKeywordWeight,
+      'lruEventSettingNormalWeight': lruEventSettingNormalWeight,
+      'vectorSimilarityWeight': vectorSimilarityWeight,
+      'keywordMatchWeight': keywordMatchWeight,
+    };
+  }
+
+  AppSettings copyWith({
+    int? maxPromptListItems,
+    int? maxPromptLineLength,
+    int? maxEdgeLines,
+    int? maxShortTermEvents,
+    int? maxLongTermEvents,
+    int? maxUltraTermEvents,
+    int? maxRelatedEvents,
+    int? summaryThreshold,
+    int? maxShortQueue,
+    int? maxLongQueue,
+    int? maxUltraQueue,
+    int? searchDepth,
+    int? comprehensiveKeywordWeight,
+    int? comprehensiveSemanticWeight,
+    int? lruKeywordMatchWeight,
+    int? lruEventEventWeight,
+    int? lruEventBelongingKeywordWeight,
+    int? lruEventBelongingNormalWeight,
+    int? lruEventSettingKeywordWeight,
+    int? lruEventSettingNormalWeight,
+    int? vectorSimilarityWeight,
+    int? keywordMatchWeight,
+  }) {
+    return AppSettings(
+      maxPromptListItems: maxPromptListItems ?? this.maxPromptListItems,
+      maxPromptLineLength: maxPromptLineLength ?? this.maxPromptLineLength,
+      maxEdgeLines: maxEdgeLines ?? this.maxEdgeLines,
+      maxShortTermEvents: maxShortTermEvents ?? this.maxShortTermEvents,
+      maxLongTermEvents: maxLongTermEvents ?? this.maxLongTermEvents,
+      maxUltraTermEvents: maxUltraTermEvents ?? this.maxUltraTermEvents,
+      maxRelatedEvents: maxRelatedEvents ?? this.maxRelatedEvents,
+      summaryThreshold: summaryThreshold ?? this.summaryThreshold,
+      maxShortQueue: maxShortQueue ?? this.maxShortQueue,
+      maxLongQueue: maxLongQueue ?? this.maxLongQueue,
+      maxUltraQueue: maxUltraQueue ?? this.maxUltraQueue,
+      searchDepth: searchDepth ?? this.searchDepth,
+      comprehensiveKeywordWeight: comprehensiveKeywordWeight ?? this.comprehensiveKeywordWeight,
+      comprehensiveSemanticWeight: comprehensiveSemanticWeight ?? this.comprehensiveSemanticWeight,
+      lruKeywordMatchWeight: lruKeywordMatchWeight ?? this.lruKeywordMatchWeight,
+      lruEventEventWeight: lruEventEventWeight ?? this.lruEventEventWeight,
+      lruEventBelongingKeywordWeight: lruEventBelongingKeywordWeight ?? this.lruEventBelongingKeywordWeight,
+      lruEventBelongingNormalWeight: lruEventBelongingNormalWeight ?? this.lruEventBelongingNormalWeight,
+      lruEventSettingKeywordWeight: lruEventSettingKeywordWeight ?? this.lruEventSettingKeywordWeight,
+      lruEventSettingNormalWeight: lruEventSettingNormalWeight ?? this.lruEventSettingNormalWeight,
+      vectorSimilarityWeight: vectorSimilarityWeight ?? this.vectorSimilarityWeight,
+      keywordMatchWeight: keywordMatchWeight ?? this.keywordMatchWeight,
+    );
+  }
+}
