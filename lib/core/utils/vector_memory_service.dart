@@ -4,7 +4,12 @@ import 'package:hive/hive.dart';
 class VectorMemoryService {
   static const String _vectorBoxName = 'vector_memory';
   static const String _embeddingModelPath = 'assets/models/embedding_model.tflite';
-  
+
+  // 单例模式
+  static final VectorMemoryService _instance = VectorMemoryService._internal();
+  factory VectorMemoryService() => _instance;
+  VectorMemoryService._internal();
+
   late Box<VectorEntry> _vectorBox;
   bool _initialized = false;
   

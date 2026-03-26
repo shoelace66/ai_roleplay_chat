@@ -1,7 +1,7 @@
 name: flutter_chat_demo
 description: Rebuilt chat demo
 publish_to: "none"
-version: 1.3.0+2
+version: 2.0.0+4
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -14,6 +14,7 @@ dependencies:
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   tflite_flutter: ^0.10.4
+  jieba_flutter: ^0.2.0
 
 dev_dependencies:
   flutter_test:

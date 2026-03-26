@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/data/models/app_settings.dart';
+import '../../../../core/utils/chinese_tokenizer_service.dart';
 import '../../../../core/utils/structured_input_prompt_composer.dart';
 import '../../../../core/utils/structured_output_regex_parser.dart';
 import '../../../../core/utils/vector_memory_service.dart';
@@ -106,10 +107,9 @@ class ChatProvider extends ChangeNotifier {
 
   /// 关键词提取正则表达式
   ///
-  /// 匹配中文字符、英文字母、数字和下划线，最少2个字符
-  /// 用于从用户输入中提取本地关键词
-  static final RegExp _keywordTokenReg =
-      RegExp(r'[\u4e00-\u9fffA-Za-z0-9_]{2,4}');
+  /// 中文分词服务实例
+  /// 用于从用户输入中提取本地关键词，替代原有的正则表达式分词
+  final ChineseTokenizerService _tokenizer = ChineseTokenizerService();
 
   /// 调试模式输出Schema
   ///
@@ -262,6 +262,9 @@ class ChatProvider extends ChangeNotifier {
   Future<void> initialize() async {
     // 初始化向量记忆服务
     await _vectorMemory.initialize();
+
+    // 初始化中文分词服务
+    await _tokenizer.init();
 
     // 加载Agent设置
     final settings = await _agentStore.readAgentSettings();
@@ -1022,23 +1025,27 @@ class ChatProvider extends ChangeNotifier {
     final patch = StructuredOutputRegexParser.extractMemoryPatch(response);
     if (patch == null) return;
 
-    // 提取各类数据
-    final incomingEvents = _extractEvents(patch['events']);
+    // 提取各类数据（使用安全提取方法，支持字段可选）
+    final incomingEvents = _extractEventsFromPatch(patch);
     final world = _mergeUnique(
       contact.worldKnowledge.items,
-      _extractStrings(patch['worldKnowledge']),
+      StructuredOutputRegexParser.extractStringList(patch, 'worldKnowledge'),
     );
     final self = _mergeUnique(
       contact.selfKnowledge.items,
-      _extractStrings(patch['selfKnowledge']),
+      StructuredOutputRegexParser.extractStringList(patch, 'selfKnowledge'),
     );
     final user = _mergeUnique(
       contact.userKnowledge.items,
-      _extractStrings(patch['userKnowledge']),
+      StructuredOutputRegexParser.extractStringList(patch, 'userKnowledge'),
     );
-    final status =
-        _mergeUnique(contact.status, _extractStrings(patch['status']));
-    final patchBelongings = _extractBelongingPatchItems(patch['belongings']);
+    final status = _mergeUnique(
+      contact.status,
+      StructuredOutputRegexParser.extractStringList(patch, 'status'),
+    );
+    final patchBelongings = _extractBelongingPatchItems(
+      StructuredOutputRegexParser.extractStringList(patch, 'belongings'),
+    );
 
     // 更新事件图
     // 每轮清空belongingEventQueues、settingEventQueues和edges，只保留当前轮的关联
@@ -1112,8 +1119,10 @@ class ChatProvider extends ChangeNotifier {
         patch: patchBelongings,
       ),
       status: status,
-      mood: _extractString(patch['mood'], fallback: contact.mood),
-      time: _extractString(patch['time'], fallback: contact.time),
+      mood: StructuredOutputRegexParser.extractString(patch, 'mood') ??
+          contact.mood,
+      time: StructuredOutputRegexParser.extractString(patch, 'time') ??
+          contact.time,
       createdAt: contact.createdAt,
     );
     await _agentStore.saveContacts(_contacts);
@@ -1662,7 +1671,7 @@ class ChatProvider extends ChangeNotifier {
 
   /// 构建关键词提取Prompt
   String _buildKeywordPrompt(String userInput) {
-    return '你是关键词抽取器。只输出 JSON：{"keywords":["关键词1","关键词2"]}。最多 8 个关键词。用户输入：${userInput.trim()}';
+    return '你是关键词抽取器，总结文段keyword。只输出 JSON：{"keywords":["关键词1","关键词2"]}。最多 8 个关键词。用户输入：${userInput.trim()}';
   }
 
   /// 构建关键词搜索输入
@@ -1693,16 +1702,23 @@ class ChatProvider extends ChangeNotifier {
 
   /// 从输入中提取本地关键词
   ///
-  /// 使用正则表达式匹配中文字符、英文单词等
+  /// 使用jieba中文分词器提取关键词，替代原有的正则表达式匹配
+  /// 支持中文分词、停用词过滤、词频统计
   Set<String> _extractLocalKeywords(String input) {
-    final out = <String>{};
-    for (final m in _keywordTokenReg.allMatches(input.toLowerCase())) {
-      final token = m.group(0)?.trim();
-      if (token == null || token.isEmpty) continue;
-      out.add(token);
-      if (out.length >= 8) break;
+    try {
+      // 使用jieba分词器提取关键词
+      final keywords = _tokenizer.extractKeywords(input, topK: 8);
+      return keywords.toSet();
+    } catch (e) {
+      // 如果分词器未初始化或出错，回退到简单的空格分割
+      final words = input
+          .toLowerCase()
+          .split(RegExp(r'\s+'))
+          .where((s) => s.length >= 2)
+          .take(8)
+          .toSet();
+      return words;
     }
-    return out;
   }
 
   // ==================== 事件图操作辅助方法 ====================
@@ -2049,13 +2065,12 @@ class ChatProvider extends ChangeNotifier {
 
   // ==================== 数据提取辅助方法 ====================
 
-  /// 从JSON中提取事件列表
-  List<EventMemory> _extractEvents(dynamic value) {
-    if (value is! List) return const <EventMemory>[];
+  /// 从 memoryPatch 中提取事件列表
+  List<EventMemory> _extractEventsFromPatch(Map<String, dynamic>? patch) {
+    final eventList = StructuredOutputRegexParser.extractEventList(patch);
+    if (eventList.isEmpty) return const <EventMemory>[];
     final out = <EventMemory>[];
-    for (final item in value) {
-      if (item is! Map) continue;
-      final map = item.map((k, v) => MapEntry(k.toString(), v));
+    for (final map in eventList) {
       final e = EventMemory.fromJson(map);
       if (!e.isEmpty) out.add(e);
     }
@@ -2120,15 +2135,13 @@ class ChatProvider extends ChangeNotifier {
     return out;
   }
 
-  /// 从JSON中提取物品补丁项
+  /// 从字符串列表中提取物品补丁项
   ///
   /// 解析格式：(新增)物品名 或 (提及)物品名
-  List<_BelongingPatchItem> _extractBelongingPatchItems(dynamic value) {
-    if (value is! List) return const <_BelongingPatchItem>[];
+  List<_BelongingPatchItem> _extractBelongingPatchItems(List<String> items) {
     final out = <_BelongingPatchItem>[];
     final reg = RegExp(r'^[\(\（]\s*(新增|提及)\s*[\)\）]\s*(.+)$');
-    for (final raw in value) {
-      final text = raw?.toString().trim() ?? '';
+    for (final text in items) {
       final m = reg.firstMatch(text);
       if (m == null) continue;
       final tag = m.group(1)?.trim() ?? '';
