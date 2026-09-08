@@ -1,4 +1,5 @@
 import '../../../worldbook/domain/entities/world_book.dart';
+import 'continuity_state.dart';
 
 enum ContactCategory { story, contact, assistant }
 
@@ -566,7 +567,8 @@ class Contact {
     required this.avatar,
     this.category = ContactCategory.contact,
     this.fixedInput = '',
-    this.currentStates = const <String, String>{},
+    Map<String, String> currentStates = const <String, String>{},
+    ContinuityState continuity = const ContinuityState.empty(),
     this.personality = const <String>[],
     this.appearance = const <String>[],
     this.personalInfo = const <String>[],
@@ -588,14 +590,15 @@ class Contact {
     this.voice = '',
     this.worldBook = const WorldBook(),
     required this.createdAt,
-  });
+  }) : continuity = continuity.withLegacy(currentStates);
 
   final String id;
   final String name;
   final String avatar;
   final ContactCategory category;
   final String fixedInput;
-  final Map<String, String> currentStates;
+  Map<String, String> get currentStates => continuity.byName;
+  final ContinuityState continuity;
   final List<String> personality;
   final List<String> appearance;
   final List<String> personalInfo;
@@ -622,6 +625,17 @@ class Contact {
     EventLruBucket? events,
     EventGraphMemory? eventGraph,
     WorldBook? worldBook,
+    ContinuityState? continuity,
+    Map<String, String>? currentStates,
+    WorldKnowledgeBucket? worldKnowledge,
+    SelfKnowledgeBucket? selfKnowledge,
+    UserKnowledgeBucket? userKnowledge,
+    List<String>? keywordLibrary,
+    List<String>? themeLibrary,
+    List<String>? belongings,
+    List<String>? status,
+    String? mood,
+    String? time,
   }) {
     return Contact(
       id: id,
@@ -629,7 +643,8 @@ class Contact {
       avatar: avatar,
       category: category,
       fixedInput: fixedInput,
-      currentStates: currentStates,
+      currentStates: currentStates ?? const {},
+      continuity: continuity ?? this.continuity,
       personality: personality,
       appearance: appearance,
       personalInfo: personalInfo,
@@ -637,17 +652,17 @@ class Contact {
       backgroundStory: backgroundStory,
       narrativeRules: narrativeRules,
       otherCharacteristics: otherCharacteristics,
-      worldKnowledge: worldKnowledge,
-      selfKnowledge: selfKnowledge,
-      userKnowledge: userKnowledge,
-      keywordLibrary: keywordLibrary,
-      themeLibrary: themeLibrary,
+      worldKnowledge: worldKnowledge ?? this.worldKnowledge,
+      selfKnowledge: selfKnowledge ?? this.selfKnowledge,
+      userKnowledge: userKnowledge ?? this.userKnowledge,
+      keywordLibrary: keywordLibrary ?? this.keywordLibrary,
+      themeLibrary: themeLibrary ?? this.themeLibrary,
       events: events ?? this.events,
       eventGraph: eventGraph ?? this.eventGraph,
-      belongings: belongings,
-      status: status,
-      mood: mood,
-      time: time,
+      belongings: belongings ?? this.belongings,
+      status: status ?? this.status,
+      mood: mood ?? this.mood,
+      time: time ?? this.time,
       voice: voice,
       worldBook: worldBook ?? this.worldBook,
       createdAt: createdAt,
@@ -665,7 +680,11 @@ class Contact {
       avatar: (json['avatar'] ?? '').toString(),
       category: _contactCategoryFromStorage(categoryText),
       fixedInput: (json['fixedInput'] ?? '').toString(),
-      currentStates: _readStringMap(json['currentStates']),
+      currentStates: json['continuity'] is Map &&
+              (json['continuity'] as Map)['definitions'] != null
+          ? const {}
+          : _readStringMap(json['currentStates']),
+      continuity: ContinuityState.fromJson(json['continuity']),
       personality: _readStringList(json['personality']),
       appearance: _readStringList(json['appearance']),
       personalInfo: _readStringList(json['personalInfo']),
@@ -711,6 +730,9 @@ class Contact {
     if (avatar.isNotEmpty) json['avatar'] = avatar;
     if (fixedInput.isNotEmpty) json['fixedInput'] = fixedInput;
     if (currentStates.isNotEmpty) json['currentStates'] = currentStates;
+    if (continuity.definitions.isNotEmpty || continuity.revision != 0) {
+      json['continuity'] = continuity.toJson();
+    }
     if (personality.isNotEmpty) json['personality'] = personality;
     if (appearance.isNotEmpty) json['appearance'] = appearance;
     if (personalInfo.isNotEmpty) json['personalInfo'] = personalInfo;
@@ -764,7 +786,8 @@ class Contact {
       avatar: avatar,
       category: category,
       fixedInput: fixedInput,
-      currentStates: Map<String, String>.from(currentStates),
+      currentStates: const {},
+      continuity: continuity,
       personality: List<String>.from(personality),
       appearance: List<String>.from(appearance),
       personalInfo: List<String>.from(personalInfo),
@@ -794,6 +817,7 @@ class Contact {
       mood: mood,
       time: time,
       voice: voice,
+      worldBook: WorldBook.fromJson(worldBook.toJson()),
       createdAt: createdAt,
     );
   }
@@ -834,7 +858,7 @@ Map<String, String> _readStringMap(dynamic value) {
   for (final entry in value.entries) {
     final key = entry.key.toString().trim();
     if (key.isEmpty) continue;
-    out[key] = entry.value?.toString().trim() ?? '';
+    out[key] = entry.value?.toString() ?? '';
   }
   return out;
 }

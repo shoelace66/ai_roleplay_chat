@@ -198,6 +198,8 @@ class MemoryRecallService {
   ///
   /// [EventGraphMemory] 应被当作不可变快照使用；图发生变化后应产生新对象，
   /// 此时自然会构建新索引。
+  void invalidateIndex(EventGraphMemory graph) => _indexCache[graph] = null;
+
   MemoryRecallIndex indexFor(EventGraphMemory graph) {
     final cached = _indexCache[graph];
     if (cached != null) return cached;

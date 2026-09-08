@@ -1,3 +1,5 @@
+import 'package:flutter_chat_demo/features/chat/data/models/continuity_state.dart';
+import 'package:flutter_chat_demo/features/worldbook/domain/entities/world_book.dart';
 import 'package:flutter_chat_demo/features/chat/data/datasources/sqlite_chat_persistence.dart';
 import 'package:flutter_chat_demo/features/chat/data/models/contact.dart';
 import 'package:flutter_chat_demo/features/chat/data/models/message.dart';
@@ -21,7 +23,14 @@ void main() {
   tearDown(() => persistence.close());
 
   test('完整往返联系人、消息、三级事件、边和关系队列', () async {
-    final contact = _contact('role-1');
+    final contact = _contact('role-1').copyWith(
+      continuity: ContinuityState(revision: 7, values: {
+        'scene/location': '旧车站',
+        'actor/林夏/outfit': '白衬衫、黑裙',
+      }),
+      worldBook: const WorldBook(
+          locations: [WorldLocation(id: 'station', name: '旧车站')]),
+    );
     final messages = <Message>[
       _message('m1', MessageRole.user, '你好', 1),
       _message('m2', MessageRole.assistant, '晚上好', 2),
@@ -35,6 +44,8 @@ void main() {
 
     expect(restored.contacts, hasLength(1));
     final restoredContact = restored.contacts.single;
+    expect(restoredContact.continuity.toJson(), contact.continuity.toJson());
+    expect(restoredContact.worldBook.toJson(), contact.worldBook.toJson());
     expect(restoredContact.name, '角色-role-1');
     expect(restoredContact.eventGraph.shortTermQueue.single.id, 'short-1');
     expect(restoredContact.eventGraph.longTermQueue.single.summarized, isTrue);
@@ -326,7 +337,13 @@ void main() {
       contacts: <Contact>[contact],
       messagesByContact: const <String, List<Message>>{'role-1': <Message>[]},
     ));
-    await persistence.replaceTimelineArchive(archive);
+    await persistence.restoreStoryBackup(
+        ChatSnapshot(contacts: [
+          contact
+        ], messagesByContact: {
+          'role-1': [_message('m1', MessageRole.user, '一轮', 1)]
+        }),
+        archive);
     final restored = await persistence.readTimelineArchive();
 
     expect(restored.branches, hasLength(2));

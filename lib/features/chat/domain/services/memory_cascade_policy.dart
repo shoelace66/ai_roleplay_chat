@@ -8,14 +8,17 @@ class MemoryCascadeDecision {
   const MemoryCascadeDecision({
     required this.sourceTier,
     required this.pendingEvents,
+    this.sourceNodeIds = const <String>[],
   });
 
   const MemoryCascadeDecision.none()
       : sourceTier = null,
+        sourceNodeIds = const <String>[],
         pendingEvents = const <EventMemory>[];
 
   final EventTier? sourceTier;
   final List<EventMemory> pendingEvents;
+  final List<String> sourceNodeIds;
 
   bool get needsSummary => sourceTier != null;
 }
@@ -32,6 +35,10 @@ class MemoryCascadePolicy {
     if (shortPending.length >= shortTermThreshold) {
       return MemoryCascadeDecision(
         sourceTier: EventTier.shortTerm,
+        sourceNodeIds: shortPending
+            .take(shortTermThreshold)
+            .map((node) => node.id)
+            .toList(growable: false),
         pendingEvents: shortPending
             .take(shortTermThreshold)
             .map((node) => node.event)
@@ -43,6 +50,10 @@ class MemoryCascadePolicy {
     if (longPending.length >= longTermThreshold) {
       return MemoryCascadeDecision(
         sourceTier: EventTier.longTerm,
+        sourceNodeIds: longPending
+            .take(longTermThreshold)
+            .map((node) => node.id)
+            .toList(growable: false),
         pendingEvents: longPending
             .take(longTermThreshold)
             .map((node) => node.event)

@@ -47,7 +47,8 @@ class WorldLocation {
         'description': description,
         'type': type,
         if (parentId != null) 'parentId': parentId,
-        if (relatedCharacterIds.isNotEmpty) 'relatedCharacterIds': relatedCharacterIds,
+        if (relatedCharacterIds.isNotEmpty)
+          'relatedCharacterIds': relatedCharacterIds,
         if (tags.isNotEmpty) 'tags': tags,
         'createdAtMs': createdAtMs,
       };
@@ -65,7 +66,9 @@ class WorldLocation {
               .toList(growable: false)
           : const <String>[],
       tags: json['tags'] is List
-          ? (json['tags'] as List).map((e) => e.toString()).toList(growable: false)
+          ? (json['tags'] as List)
+              .map((e) => e.toString())
+              .toList(growable: false)
           : const <String>[],
       createdAtMs: (json['createdAtMs'] as num?)?.toInt() ?? 0,
     );
@@ -133,13 +136,19 @@ class WorldOrganization {
       description: (json['description'] ?? '').toString(),
       leaderId: json['leaderId']?.toString(),
       memberIds: json['memberIds'] is List
-          ? (json['memberIds'] as List).map((e) => e.toString()).toList(growable: false)
+          ? (json['memberIds'] as List)
+              .map((e) => e.toString())
+              .toList(growable: false)
           : const <String>[],
       goals: json['goals'] is List
-          ? (json['goals'] as List).map((e) => e.toString()).toList(growable: false)
+          ? (json['goals'] as List)
+              .map((e) => e.toString())
+              .toList(growable: false)
           : const <String>[],
       tags: json['tags'] is List
-          ? (json['tags'] as List).map((e) => e.toString()).toList(growable: false)
+          ? (json['tags'] as List)
+              .map((e) => e.toString())
+              .toList(growable: false)
           : const <String>[],
       createdAtMs: (json['createdAtMs'] as num?)?.toInt() ?? 0,
     );
@@ -269,7 +278,9 @@ class WorldTimelineEvent {
               .toList(growable: false)
           : const <String>[],
       tags: json['tags'] is List
-          ? (json['tags'] as List).map((e) => e.toString()).toList(growable: false)
+          ? (json['tags'] as List)
+              .map((e) => e.toString())
+              .toList(growable: false)
           : const <String>[],
       createdAtMs: (json['createdAtMs'] as num?)?.toInt() ?? 0,
     );
@@ -349,6 +360,62 @@ class WorldBook {
     );
   }
 
+  /// Stable, model-facing world data without persistence-only timestamps.
+  Map<String, dynamic> toPromptData() => <String, dynamic>{
+        if (locations.isNotEmpty)
+          'locations': locations
+              .map((item) => <String, dynamic>{
+                    'id': item.id,
+                    'name': item.name,
+                    if (item.description.isNotEmpty)
+                      'description': item.description,
+                    if (item.type.isNotEmpty) 'type': item.type,
+                    if (item.parentId != null) 'parentId': item.parentId,
+                    if (item.relatedCharacterIds.isNotEmpty)
+                      'relatedCharacterIds': item.relatedCharacterIds,
+                    if (item.tags.isNotEmpty) 'tags': item.tags,
+                  })
+              .toList(growable: false),
+        if (organizations.isNotEmpty)
+          'organizations': organizations
+              .map((item) => <String, dynamic>{
+                    'id': item.id,
+                    'name': item.name,
+                    if (item.description.isNotEmpty)
+                      'description': item.description,
+                    if (item.leaderId != null) 'leaderId': item.leaderId,
+                    if (item.memberIds.isNotEmpty) 'memberIds': item.memberIds,
+                    if (item.goals.isNotEmpty) 'goals': item.goals,
+                    if (item.tags.isNotEmpty) 'tags': item.tags,
+                  })
+              .toList(growable: false),
+        if (rules.isNotEmpty)
+          'rules': rules
+              .map((item) => <String, dynamic>{
+                    'id': item.id,
+                    'name': item.name,
+                    if (item.description.isNotEmpty)
+                      'description': item.description,
+                    if (item.type.isNotEmpty) 'type': item.type,
+                    if (item.scope.isNotEmpty) 'scope': item.scope,
+                  })
+              .toList(growable: false),
+        if (timelineEvents.isNotEmpty)
+          'timelineEvents': timelineEvents
+              .map((item) => <String, dynamic>{
+                    'id': item.id,
+                    'title': item.title,
+                    if (item.description.isNotEmpty)
+                      'description': item.description,
+                    'year': item.year,
+                    if (item.locationId != null) 'locationId': item.locationId,
+                    if (item.participantIds.isNotEmpty)
+                      'participantIds': item.participantIds,
+                    if (item.tags.isNotEmpty) 'tags': item.tags,
+                  })
+              .toList(growable: false),
+      };
+
   String toPromptSection() {
     final parts = <String>[];
     if (locations.isNotEmpty) {
@@ -364,6 +431,11 @@ class WorldBook {
     if (rules.isNotEmpty) {
       parts.add(
         '世界规则：\n${rules.map((r) => '- ${r.name}${r.description.isNotEmpty ? "：${r.description}" : ""} [类型：${r.type}，范围：${r.scope}]').join("\n")}',
+      );
+    }
+    if (timelineEvents.isNotEmpty) {
+      parts.add(
+        '时间线：\n${timelineEvents.map((e) => '- ${e.year} · ${e.title}${e.description.isNotEmpty ? "：${e.description}" : ""}${e.locationId != null ? " [地点：${e.locationId}]" : ""}${e.participantIds.isNotEmpty ? " [参与者：${e.participantIds.join("、")}]" : ""}${e.tags.isNotEmpty ? " [标签：${e.tags.join("、")}]" : ""}').join("\n")}',
       );
     }
     return parts.join('\n\n');

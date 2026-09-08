@@ -1,3 +1,5 @@
+import '../repositories/story_turn_persistence.dart';
+import '../../data/models/continuity_state.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -36,7 +38,7 @@ import '../services/event_recall_coordinator.dart';
 import '../services/memory_cascade_policy.dart';
 import '../services/chat_backup_codec.dart';
 import '../services/memory_graph_service.dart';
-import '../services/memory_patch_reducer.dart';
+import '../services/roleplay_turn.dart';
 import '../services/memory_recall_service.dart';
 import '../services/memory_revision_service.dart';
 import '../../../worldbook/domain/entities/world_book.dart';
@@ -53,15 +55,6 @@ import '../../../worldbook/domain/entities/world_book.dart';
 /// 使用 [ChangeNotifier] 模式，UI层通过监听此Provider来响应状态变化
 class ChatProvider extends ChangeNotifier {
   static const int _messagePageSize = 100;
-
-  /// 用户可见正文的最小阅读时长（秒）目标：按 5 秒阅读。
-  static const int _minReplyReadingSeconds = 5;
-
-  // 粗略可读性估算：中文按 6 个/秒，英文按 2.2 个词/秒。
-  // 5 秒目标下，中文约 30 字，英文约 11 词；再叠加 180 字兜底，避免混合输出仍过短。
-  static const double _readabilityChineseCharsPerSecond = 6.0;
-  static const double _readabilityEnglishWordsPerSecond = 2.2;
-  static const int _minReplyLengthFallbackChars = 180;
 
   /// 构造函数
   ///
@@ -290,7 +283,6 @@ class ChatProvider extends ChangeNotifier {
   final MemoryGraphService _memoryGraphService = const MemoryGraphService();
 
   /// LLM 记忆补丁解析与联系人字段归并（纯业务规则）。
-  final MemoryPatchReducer _memoryPatchReducer = const MemoryPatchReducer();
 
   /// 本地事件图召回与关系清理。
   final MemoryRecallService _memoryRecallService;
@@ -347,7 +339,13 @@ class ChatProvider extends ChangeNotifier {
 
   /// 是否正在加载中
   bool _isLoading = false;
-  bool get isLoading => _isLoading;
+  bool _storyMutationBusy = false;
+  StoryTurnHandle? _activeStoryTurn;
+  StoryTruncation? _latestStoryTurn;
+  StoryTurnPersistence? get _storyStore => _persistence is StoryTurnPersistence
+      ? _persistence as StoryTurnPersistence
+      : null;
+  bool get isLoading => _isLoading || _storyMutationBusy;
 
   /// AI是否正在输入（用于显示打字指示器）
   bool _isTyping = false;
@@ -465,6 +463,7 @@ class ChatProvider extends ChangeNotifier {
     required Message userMessage,
     required String systemPrompt,
     required String dynamicContext,
+    required List<Message> conversationHistory,
   }) async {
     AiServiceException? lastError;
     for (final profile in llmProfiles.where((profile) => profile.hasApiKey)) {
@@ -475,6 +474,7 @@ class ChatProvider extends ChangeNotifier {
           userMessage: userMessage,
           systemPrompt: systemPrompt,
           dynamicContext: dynamicContext,
+          conversationHistory: conversationHistory,
           settings: _appSettings,
           profile: profile,
         ));
@@ -490,6 +490,7 @@ class ChatProvider extends ChangeNotifier {
     required Message userMessage,
     required String systemPrompt,
     required String dynamicContext,
+    required List<Message> conversationHistory,
   }) async* {
     AiServiceException? lastError;
     for (final profile in llmProfiles.where((profile) => profile.hasApiKey)) {
@@ -501,6 +502,7 @@ class ChatProvider extends ChangeNotifier {
           userMessage: userMessage,
           systemPrompt: systemPrompt,
           dynamicContext: dynamicContext,
+          conversationHistory: conversationHistory,
           settings: _appSettings,
           profile: profile,
         )) {
@@ -591,17 +593,27 @@ class ChatProvider extends ChangeNotifier {
 
   /// 是否可以撤回最近一轮对话
   bool get canRecall {
-    final result = _lastContactSnapshot != null;
+    final result = (_storyStore != null &&
+                selectedContact?.category != ContactCategory.assistant
+            ? _latestStoryTurn != null
+            : _lastContactSnapshot != null) &&
+        !isLoading;
     debugPrint('[canRecall] result=$result, snapshot=$_lastContactSnapshot');
     return result;
   }
 
   bool get canRegenerateLastTurn =>
-      _lastContactSnapshot?.id == _selectedContactId &&
+      (_storyStore != null
+          ? _latestStoryTurn != null
+          : _lastContactSnapshot?.id == _selectedContactId) &&
       lastTurnUserInput != null &&
       !isLoading;
 
   String? get lastTurnUserInput {
+    if (_storyStore != null &&
+        selectedContact?.category != ContactCategory.assistant) {
+      return _latestStoryTurn?.input;
+    }
     final contactId = _selectedContactId;
     final before = _lastMessagesSnapshot;
     if (contactId == null || before == null) return null;
@@ -619,6 +631,10 @@ class ChatProvider extends ChangeNotifier {
     final original = lastTurnUserInput;
     final input = (editedInput ?? original ?? '').trim();
     if (!canRegenerateLastTurn || input.isEmpty) return false;
+    if (_storyStore != null &&
+        selectedContact?.category != ContactCategory.assistant) {
+      return _truncateAndResend(_latestStoryTurn!, input);
+    }
     if (!await recallLastTurn()) return false;
     await sendMessage(input);
     return error == null;
@@ -708,6 +724,7 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> _initializeLocalData() async {
     await _persistence.initialize();
+    await _storyStore?.recoverStoryAttempts();
     await MigrateLegacyChatData(
       target: _persistence,
       source: SharedPreferencesLegacyChatSnapshotSource(_agentStore),
@@ -798,6 +815,7 @@ class ChatProvider extends ChangeNotifier {
     if (contactId == null ||
         persistence is! PaginatedChatPersistence ||
         isLoadingOlderMessages ||
+        isLoading ||
         !(_hasOlderMessagesByContact[contactId] ?? false)) {
       return false;
     }
@@ -831,6 +849,10 @@ class ChatProvider extends ChangeNotifier {
     final state = await _timelineUseCase.load(contactId);
     _branchesByContact[contactId] = state.branches;
     _checkpointsByContact[contactId] = state.checkpoints;
+    if (_selectedContactId == contactId && _storyStore != null) {
+      _latestStoryTurn =
+          await _storyStore!.previewStoryTruncation(contactId: contactId);
+    }
   }
 
   Future<void> refreshConversationTimeline() async {
@@ -875,13 +897,18 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> createBranchFromCheckpoint(
+  Future<bool> createBranchFromCheckpoint(String checkpointId,
+          {required String name, bool switchToNewBranch = true}) =>
+      _runStoryMutation(() => _createBranchFromCheckpoint(checkpointId,
+          name: name, switchToNewBranch: switchToNewBranch));
+
+  Future<bool> _createBranchFromCheckpoint(
     String checkpointId, {
     required String name,
     bool switchToNewBranch = true,
   }) async {
     final contactId = _selectedContactId;
-    if (contactId == null || !_timelineUseCase.isAvailable || isLoading) {
+    if (contactId == null || !_timelineUseCase.isAvailable || _isLoading) {
       return false;
     }
     try {
@@ -891,7 +918,7 @@ class ChatProvider extends ChangeNotifier {
       );
       if (branch == null) return false;
       if (switchToNewBranch) {
-        return switchConversationBranch(branch.id);
+        return _switchConversationBranch(branch.id);
       }
       await _refreshTimeline(contactId);
       notifyListeners();
@@ -903,9 +930,12 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> switchConversationBranch(String branchId) async {
+  Future<bool> switchConversationBranch(String branchId) =>
+      _runStoryMutation(() => _switchConversationBranch(branchId));
+
+  Future<bool> _switchConversationBranch(String branchId) async {
     final contactId = _selectedContactId;
-    if (contactId == null || !_timelineUseCase.isAvailable || isLoading) {
+    if (contactId == null || !_timelineUseCase.isAvailable || _isLoading) {
       return false;
     }
     _isLoadingOlderMessages = true;
@@ -926,7 +956,7 @@ class ChatProvider extends ChangeNotifier {
       _messageCountByContact[contactId] = all.length;
       _hasOlderMessagesByContact[contactId] = start > 0;
       _clearSnapshot();
-      await _refreshTimeline(contactId);
+      await _reloadStory(contactId);
       _error = null;
       return true;
     } catch (e) {
@@ -938,7 +968,10 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> renameConversationBranch(String branchId, String name) async {
+  Future<bool> renameConversationBranch(String branchId, String name) =>
+      _runStoryMutation(() => _renameConversationBranch(branchId, name));
+
+  Future<bool> _renameConversationBranch(String branchId, String name) async {
     final contactId = _selectedContactId;
     if (contactId == null || !_timelineUseCase.isAvailable) {
       return false;
@@ -955,7 +988,10 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> deleteConversationBranch(String branchId) async {
+  Future<bool> deleteConversationBranch(String branchId) =>
+      _runStoryMutation(() => _deleteConversationBranch(branchId));
+
+  Future<bool> _deleteConversationBranch(String branchId) async {
     final contactId = _selectedContactId;
     if (contactId == null || !_timelineUseCase.isAvailable) {
       return false;
@@ -972,7 +1008,10 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> setCheckpointKey(String checkpointId, bool isKey) async {
+  Future<bool> setCheckpointKey(String checkpointId, bool isKey) =>
+      _runStoryMutation(() => _setCheckpointKey(checkpointId, isKey));
+
+  Future<bool> _setCheckpointKey(String checkpointId, bool isKey) async {
     final contactId = _selectedContactId;
     if (contactId == null || !_timelineUseCase.isAvailable) {
       return false;
@@ -989,39 +1028,14 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _persistAll() {
-    final paginated = _persistence;
-    final contact = selectedContact;
-    if (paginated is PaginatedChatPersistence && contact != null) {
-      final paginatedStore = paginated as PaginatedChatPersistence;
-      final messages = _messagesByContact[contact.id] ?? const <Message>[];
-      _loadedStartSequenceByContact.putIfAbsent(contact.id, () => 0);
-      _messageCountByContact[contact.id] = messages.length;
-      _hasOlderMessagesByContact[contact.id] = false;
-      return paginatedStore.saveConversationTail(
-        contact: contact,
-        startSequence: 0,
-        messages: List<Message>.from(messages),
-      );
-    }
-    return _persistence.replaceSnapshot(
-      ChatSnapshot(
-        contacts: List<Contact>.from(_contacts),
-        messagesByContact: <String, List<Message>>{
-          for (final entry in _messagesByContact.entries)
-            entry.key: List<Message>.from(entry.value),
-        },
-      ),
-    );
-  }
-
   Future<void> _persistConversation(
     String contactId, {
     Map<String, String> metadataUpdates = const <String, String>{},
+    Contact? stagedContact,
   }) {
-    Contact? contact;
+    Contact? contact = stagedContact;
     for (final item in _contacts) {
-      if (item.id == contactId) {
+      if (contact == null && item.id == contactId) {
         contact = item;
         break;
       }
@@ -1055,12 +1069,22 @@ class ChatProvider extends ChangeNotifier {
   String _memoryLocksKey(String contactId) => 'memory_locks_v1_$contactId';
 
   Future<String> exportBackupJson() async {
-    final snapshot = await _persistence.readSnapshot();
-    final timeline = await _timelineUseCase.exportArchive();
-    return _chatBackupCodec.encode(snapshot, timeline: timeline);
+    if (isLoading || isLoadingOlderMessages) throw StateError('请等待当前剧情操作完成后导出');
+    _storyMutationBusy = true;
+    try {
+      final snapshot = await _persistence.readSnapshot();
+      final timeline = await _timelineUseCase.exportArchive();
+      return _chatBackupCodec.encode(snapshot, timeline: timeline);
+    } finally {
+      _storyMutationBusy = false;
+      notifyListeners();
+    }
   }
 
-  Future<bool> restoreBackupJson(String source) async {
+  Future<bool> restoreBackupJson(String source) =>
+      _runStoryMutation(() => _restoreBackupJson(source));
+
+  Future<bool> _restoreBackupJson(String source) async {
     try {
       final bundle = _chatBackupCodec.decodeBundle(source);
       final restored = bundle.snapshot;
@@ -1068,10 +1092,14 @@ class ChatProvider extends ChangeNotifier {
         ..._contacts.map((contact) => contact.id),
         ...restored.contacts.map((contact) => contact.id),
       };
-      await _persistence.replaceSnapshot(restored);
-      await _timelineUseCase.restoreArchive(bundle.timeline);
-      for (final contactId in revisionContactIds) {
-        await _persistence.writeMetadata(_memoryRevisionKey(contactId), '');
+      if (_storyStore != null) {
+        await _storyStore!.restoreStoryBackup(restored, bundle.timeline);
+      } else {
+        await _persistence.replaceSnapshot(restored);
+        await _timelineUseCase.restoreArchive(bundle.timeline);
+        for (final contactId in revisionContactIds) {
+          await _persistence.writeMetadata(_memoryRevisionKey(contactId), '');
+        }
       }
       _contacts
         ..clear()
@@ -1097,10 +1125,11 @@ class ChatProvider extends ChangeNotifier {
         }
       }
       _lastMemoryRevisions.clear();
+      _lockedMemoryNodeIds.clear();
       _clearSnapshot();
       _error = null;
       if (_selectedContactId != null) {
-        await _refreshTimeline(_selectedContactId!);
+        await _reloadStory(_selectedContactId!);
       }
       notifyListeners();
       return true;
@@ -1163,32 +1192,17 @@ class ChatProvider extends ChangeNotifier {
   ///
   /// 切换当前活跃的聊天对象
   Future<void> selectContact(String contactId) async {
-    if (_selectedContactId == contactId) return;
-    if (!_contacts.any((c) => c.id == contactId)) return;
-    _selectedContactId = contactId;
-    _clearSnapshot();
-    notifyListeners();
-    if (!_messagesByContact.containsKey(contactId) &&
-        _persistence is PaginatedChatPersistence) {
-      _isLoadingOlderMessages = true;
-      notifyListeners();
-      try {
-        await _loadInitialMessagePage(contactId);
-        _error = null;
-      } catch (e) {
-        _error = '加载会话失败：$e';
-        _messagesByContact[contactId] = <Message>[];
-      } finally {
-        _isLoadingOlderMessages = false;
-        notifyListeners();
-      }
+    if (_selectedContactId == contactId ||
+        !_contacts.any((c) => c.id == contactId)) {
+      return;
     }
-    try {
-      await _refreshTimeline(contactId);
-    } catch (e) {
-      _error = '加载对话时间线失败：$e';
-    }
-    notifyListeners();
+    await _runStoryMutation(() async {
+      _selectedContactId = contactId;
+      _latestStoryTurn = null;
+      await _reloadStory(contactId);
+      _error = null;
+      return true;
+    });
   }
 
   MemoryRevisionImpact? previewMemoryRevision(String eventNodeId) {
@@ -1208,43 +1222,48 @@ class ChatProvider extends ChangeNotifier {
   }
 
   Future<bool> setMemoryLocked(String eventNodeId, bool locked) async {
-    final contact = selectedContact;
-    if (contact == null || !memoryNodes.any((node) => node.id == eventNodeId)) {
-      return false;
-    }
-    final locks =
-        _lockedMemoryNodeIds.putIfAbsent(contact.id, () => <String>{});
-    locked ? locks.add(eventNodeId) : locks.remove(eventNodeId);
-    await _persistence.writeMetadata(
-      _memoryLocksKey(contact.id),
-      jsonEncode(locks.toList(growable: false)),
-    );
-    notifyListeners();
-    return true;
+    return _runStoryMutation(() async {
+      final contact = selectedContact;
+      if (contact == null ||
+          !memoryNodes.any((node) => node.id == eventNodeId)) {
+        return false;
+      }
+      final locks = {...?_lockedMemoryNodeIds[contact.id]};
+      locked ? locks.add(eventNodeId) : locks.remove(eventNodeId);
+      await _persistConversation(contact.id, metadataUpdates: {
+        _memoryLocksKey(contact.id): jsonEncode(locks.toList(growable: false)),
+      });
+      _lockedMemoryNodeIds[contact.id] = locks;
+      notifyListeners();
+      return true;
+    });
   }
 
   Future<bool> deleteMemory(String eventNodeId) async {
-    final contact = selectedContact;
-    if (contact == null || isMemoryLocked(eventNodeId)) return false;
-    final node =
-        memoryNodes.where((item) => item.id == eventNodeId).firstOrNull;
-    if (node == null) return false;
-    final graph =
-        _memoryGraphService.removeNode(contact.eventGraph, eventNodeId);
-    final updated = contact.copyWith(
-      eventGraph: graph,
-      events: EventLruBucket(
-        contact.events.items
-            .where((event) => event.description != node.event.description)
-            .toList(growable: false),
-      ),
-    );
-    final index = _contacts.indexWhere((item) => item.id == contact.id);
-    if (index < 0) return false;
-    _contacts[index] = updated;
-    await _persistConversation(contact.id);
-    notifyListeners();
-    return true;
+    return _runStoryMutation(() async {
+      if (_isLoading) return false;
+      final contact = selectedContact;
+      if (contact == null || isMemoryLocked(eventNodeId)) return false;
+      final node =
+          memoryNodes.where((item) => item.id == eventNodeId).firstOrNull;
+      if (node == null) return false;
+      final graph =
+          _memoryGraphService.removeNode(contact.eventGraph, eventNodeId);
+      final updated = contact.copyWith(
+        eventGraph: graph,
+        events: EventLruBucket(
+          contact.events.items
+              .where((event) => event.description != node.event.description)
+              .toList(growable: false),
+        ),
+      );
+      final index = _contacts.indexWhere((item) => item.id == contact.id);
+      if (index < 0) return false;
+      await _persistConversation(contact.id, stagedContact: updated);
+      _contacts[index] = updated;
+      notifyListeners();
+      return true;
+    });
   }
 
   Future<bool> reviseMemory(
@@ -1272,91 +1291,100 @@ class ChatProvider extends ChangeNotifier {
     required EventMemory revisedEvent,
     required bool invalidate,
   }) async {
-    final contact = selectedContact;
-    if (contact == null) return false;
-    try {
-      final result = _memoryRevisionService.revise(
-        graph: contact.eventGraph,
-        eventNodeId: eventNodeId,
-        revisedEvent: revisedEvent,
-        revisionId: 'revision-${DateTime.now().microsecondsSinceEpoch}',
-        invalidate: invalidate,
-      );
-      final previousDescription = result.record.previousNode.event.description;
-      final retained = contact.events.items
-          .where((event) => event.description != previousDescription)
-          .toList(growable: false);
-      final updated = contact.copyWith(
-        eventGraph: result.graph,
-        events: EventLruBucket(
-          _dedupeEvents(<EventMemory>[
-            ...retained,
-            ..._flattenGraphEvents(result.graph),
-          ]),
-        ),
-      );
-      final index = _contacts.indexWhere((item) => item.id == contact.id);
-      if (index < 0) return false;
-      _contacts[index] = updated;
-      _lastMemoryRevisions[contact.id] = result.record;
-      await _persistConversation(
-        contact.id,
-        metadataUpdates: <String, String>{
-          _memoryRevisionKey(contact.id): jsonEncode(result.record.toJson()),
-        },
-      );
-      _error = null;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = '记忆修改失败：$e';
-      notifyListeners();
-      return false;
-    }
+    return _runStoryMutation(() async {
+      if (_isLoading) return false;
+      final contact = selectedContact;
+      if (contact == null) return false;
+      try {
+        final result = _memoryRevisionService.revise(
+          graph: contact.eventGraph,
+          eventNodeId: eventNodeId,
+          revisedEvent: revisedEvent,
+          revisionId: 'revision-${DateTime.now().microsecondsSinceEpoch}',
+          invalidate: invalidate,
+        );
+        final previousDescription =
+            result.record.previousNode.event.description;
+        final retained = contact.events.items
+            .where((event) => event.description != previousDescription)
+            .toList(growable: false);
+        final updated = contact.copyWith(
+          eventGraph: result.graph,
+          events: EventLruBucket(
+            _dedupeEvents(<EventMemory>[
+              ...retained,
+              ..._flattenGraphEvents(result.graph),
+            ]),
+          ),
+        );
+        final index = _contacts.indexWhere((item) => item.id == contact.id);
+        if (index < 0) return false;
+        await _persistConversation(
+          contact.id,
+          stagedContact: updated,
+          metadataUpdates: <String, String>{
+            _memoryRevisionKey(contact.id): jsonEncode(result.record.toJson()),
+          },
+        );
+        _contacts[index] = updated;
+        _lastMemoryRevisions[contact.id] = result.record;
+        _error = null;
+        notifyListeners();
+        return true;
+      } catch (e) {
+        _error = '记忆修改失败：$e';
+        notifyListeners();
+        return false;
+      }
+    });
   }
 
   Future<bool> undoLastMemoryRevision() async {
-    final contact = selectedContact;
-    if (contact == null) return false;
-    final record = _lastMemoryRevisions[contact.id];
-    if (record == null) return false;
-    try {
-      final graph = _memoryRevisionService.undo(contact.eventGraph, record);
-      final retained = contact.events.items
-          .where((event) =>
-              event.description != record.previousNode.event.description)
-          .toList(growable: false);
-      final updated = contact.copyWith(
-        eventGraph: graph,
-        events: EventLruBucket(
-          _dedupeEvents(<EventMemory>[
-            ...retained,
-            ..._flattenGraphEvents(graph),
-          ]),
-        ),
-      );
-      final index = _contacts.indexWhere((item) => item.id == contact.id);
-      if (index < 0) return false;
-      _contacts[index] = updated;
-      _lastMemoryRevisions.remove(contact.id);
-      await _persistConversation(
-        contact.id,
-        metadataUpdates: <String, String>{
-          _memoryRevisionKey(contact.id): '',
-        },
-      );
-      _error = null;
-      notifyListeners();
-      return true;
-    } on StateError {
-      _error = '已有新对话，无法撤销这次记忆修改';
-      notifyListeners();
-      return false;
-    } catch (e) {
-      _error = '撤销记忆修改失败：$e';
-      notifyListeners();
-      return false;
-    }
+    return _runStoryMutation(() async {
+      if (_isLoading) return false;
+      final contact = selectedContact;
+      if (contact == null) return false;
+      final record = _lastMemoryRevisions[contact.id];
+      if (record == null) return false;
+      try {
+        final graph = _memoryRevisionService.undo(contact.eventGraph, record);
+        final retained = contact.events.items
+            .where((event) =>
+                event.description != record.previousNode.event.description)
+            .toList(growable: false);
+        final updated = contact.copyWith(
+          eventGraph: graph,
+          events: EventLruBucket(
+            _dedupeEvents(<EventMemory>[
+              ...retained,
+              ..._flattenGraphEvents(graph),
+            ]),
+          ),
+        );
+        final index = _contacts.indexWhere((item) => item.id == contact.id);
+        if (index < 0) return false;
+        await _persistConversation(
+          contact.id,
+          stagedContact: updated,
+          metadataUpdates: <String, String>{
+            _memoryRevisionKey(contact.id): '',
+          },
+        );
+        _contacts[index] = updated;
+        _lastMemoryRevisions.remove(contact.id);
+        _error = null;
+        notifyListeners();
+        return true;
+      } on StateError {
+        _error = '已有新对话，无法撤销这次记忆修改';
+        notifyListeners();
+        return false;
+      } catch (e) {
+        _error = '撤销记忆修改失败：$e';
+        notifyListeners();
+        return false;
+      }
+    });
   }
 
   Map<String, int> get memoryStats {
@@ -1467,15 +1495,17 @@ class ChatProvider extends ChangeNotifier {
   }
 
   /// 更新当前联系人的世界书
-  void updateWorldBook(WorldBook book) {
-    final contact = selectedContact;
-    if (contact == null) return;
-    final updated = contact.copyWith(worldBook: book);
-    final index = _contacts.indexWhere((c) => c.id == contact.id);
-    if (index >= 0) {
+  Future<void> updateWorldBook(WorldBook book) async {
+    await _runStoryMutation(() async {
+      final contact = selectedContact;
+      if (contact == null) return false;
+      final index = _contacts.indexWhere((c) => c.id == contact.id);
+      final updated = contact.copyWith(worldBook: book);
+      await _persistConversation(contact.id, stagedContact: updated);
       _contacts[index] = updated;
-      notifyListeners();
-    }
+      _error = null;
+      return true;
+    });
   }
 
   /// 添加新联系人
@@ -1488,6 +1518,7 @@ class ChatProvider extends ChangeNotifier {
     required String avatar,
     String fixedInput = '',
     Map<String, String> currentStates = const <String, String>{},
+    ContinuityState continuity = const ContinuityState.empty(),
     List<String> personality = const <String>[],
     List<String> appearance = const <String>[],
     List<String> personalInfo = const <String>[],
@@ -1498,6 +1529,7 @@ class ChatProvider extends ChangeNotifier {
     ContactCategory category = ContactCategory.contact,
     String voice = '',
   }) async {
+    if (isLoading) return false;
     final normalizedName = name.trim();
     if (normalizedName.isEmpty) return false;
 
@@ -1517,6 +1549,7 @@ class ChatProvider extends ChangeNotifier {
       avatar: avatar.trim(),
       fixedInput: fixedInput.trim(),
       currentStates: _normalizeStateMap(currentStates),
+      continuity: continuity,
       personality: personality,
       appearance: appearance,
       personalInfo: personalInfo,
@@ -1529,15 +1562,7 @@ class ChatProvider extends ChangeNotifier {
       voice: voice,
       createdAt: DateTime.now(),
     );
-    _contacts.add(contact);
-    _messagesByContact.putIfAbsent(contact.id, () => <Message>[]);
-    _loadedStartSequenceByContact[contact.id] = 0;
-    _messageCountByContact[contact.id] = 0;
-    _hasOlderMessagesByContact[contact.id] = false;
-    _selectedContactId = contact.id;
-    await _persistAll();
-    notifyListeners();
-    return true;
+    return _addNewContact(contact);
   }
 
   /// 从 JSON 创建联系人
@@ -1619,8 +1644,13 @@ class ChatProvider extends ChangeNotifier {
     String jsonString, {
     ContactCategory category = ContactCategory.contact,
   }) async {
-    final data = _contactImportParser.parse(jsonString);
-    if (data == null) return false;
+    final parsed = _contactImportParser.parseDetailed(jsonString);
+    final data = parsed.data;
+    if (data == null) {
+      _error = '创建失败：${parsed.errorMessage}';
+      notifyListeners();
+      return false;
+    }
     return _persistImportedContact(
       data,
       category: category,
@@ -1640,19 +1670,26 @@ class ChatProvider extends ChangeNotifier {
     String? fallbackAvatar,
     String? fallbackFixedInput,
     Map<String, String>? fallbackCurrentStates,
+    ContinuityState fallbackContinuity = const ContinuityState.empty(),
     String fallbackVoice = '',
   }) async {
-    final data = _contactImportParser.parse(
+    final parsed = _contactImportParser.parseDetailed(
       jsonString,
       fallback: ContactImportFallback(
         name: fallbackName ?? '',
         avatar: fallbackAvatar ?? '',
         fixedInput: fallbackFixedInput ?? '',
         currentStates: fallbackCurrentStates ?? const <String, String>{},
+        continuity: fallbackContinuity,
         voice: fallbackVoice,
       ),
     );
-    if (data == null) return false;
+    final data = parsed.data;
+    if (data == null) {
+      _error = '创建失败：${parsed.errorMessage}';
+      notifyListeners();
+      return false;
+    }
     return _persistImportedContact(
       data,
       category: category,
@@ -1665,6 +1702,11 @@ class ChatProvider extends ChangeNotifier {
     required ContactCategory category,
     required bool useRequestedId,
   }) async {
+    if (isLoading || isLoadingOlderMessages) {
+      _error = '当前正在处理对话或数据，请完成后再创建。';
+      notifyListeners();
+      return false;
+    }
     var id = useRequestedId ? data.requestedId : '';
     if (id.isEmpty || _contacts.any((contact) => contact.id == id)) {
       id = _generateUniqueId(category);
@@ -1680,16 +1722,18 @@ class ChatProvider extends ChangeNotifier {
           : <String>[data.name.trim()],
       createdAt: DateTime.now(),
     );
-    _contacts.add(contact);
-    _messagesByContact.putIfAbsent(contact.id, () => <Message>[]);
-    _loadedStartSequenceByContact[contact.id] = 0;
-    _messageCountByContact[contact.id] = 0;
-    _hasOlderMessagesByContact[contact.id] = false;
-    _selectedContactId = contact.id;
-    await _persistAll();
-    notifyListeners();
-    return true;
+    return _addNewContact(contact);
   }
+
+  Future<bool> _addNewContact(Contact contact) => _runStoryMutation(() async {
+        if (_contacts.any((c) => c.id == contact.id)) return false;
+        await _persistence.saveConversation(contact: contact, messages: []);
+        _contacts.add(contact);
+        _selectedContactId = contact.id;
+        await _reloadStory(contact.id);
+        _error = null;
+        return true;
+      });
 
   /// 删除联系人
   ///
@@ -1697,10 +1741,15 @@ class ChatProvider extends ChangeNotifier {
   /// 同时删除关联的向量记忆数据，与事件队列同步清理
   /// 如果删除的是当前选中的联系人，会自动切换到其他联系人或清空选择
   /// 返回是否删除成功（失败原因：联系人不存在）
-  Future<bool> deleteContact(String contactId) async {
+  Future<bool> deleteContact(String contactId) =>
+      _runStoryMutation(() => _deleteContact(contactId));
+
+  Future<bool> _deleteContact(String contactId) async {
+    if (_isLoading) return false;
     final index = _contacts.indexWhere((c) => c.id == contactId);
     if (index == -1) return false;
 
+    await _persistence.deleteConversation(contactId);
     // 从列表中移除
     _contacts.removeAt(index);
 
@@ -1722,7 +1771,6 @@ class ChatProvider extends ChangeNotifier {
     }
 
     // SQLite 外键级联删除该联系人的消息与事件图。
-    await _persistence.deleteConversation(contactId);
     final selectedId = _selectedContactId;
     if (selectedId != null &&
         !_messagesByContact.containsKey(selectedId) &&
@@ -1751,49 +1799,43 @@ class ChatProvider extends ChangeNotifier {
     if (naturalLanguage.trim().isEmpty) return null;
 
     final typeLabel = isStory ? '故事' : '角色';
-
-    String normalize(String rawJson) => rawJson.trim();
+    String? conversionIssue;
+    _error = null;
 
     Future<String?> parseOne(String response) async {
       try {
         final extracted = _extractJsonFromResponse(response);
         if (extracted == null || extracted.isEmpty) {
-          debugPrint('Failed to extract JSON from LLM response');
+          conversionIssue = '模型响应中没有找到 JSON 对象。';
           return null;
         }
-        final json = jsonDecode(extracted) as Map<String, dynamic>;
-        final name = (json['name'] ?? '').toString().trim();
+        final parsed = _contactImportParser.parseDetailed(extracted);
+        if (!parsed.isSuccess) {
+          conversionIssue = parsed.errorMessage;
+          return null;
+        }
+        final json = jsonDecode(parsed.normalizedJson!) as Map<String, dynamic>;
         final fixedInput = (json['fixedInput'] ?? '').toString().trim();
         final personality = json['personality'];
         final appearances = json['appearance'];
-        final currentStates = json['currentStates'];
+        json.remove('currentStates');
+        json.remove('continuity');
 
         final hasPersonality = personality is List && personality.isNotEmpty;
         final hasAppearance = appearances is List && appearances.isNotEmpty;
-        final hasCurrentStates = currentStates is Map &&
-            currentStates.keys.every((k) => k.toString().isNotEmpty);
 
-        if (name.isEmpty) {
-          debugPrint('LLM generated JSON missing required fields (name)');
-          return null;
-        }
         if (fixedInput.isEmpty || fixedInput.length < 40) {
-          debugPrint('LLM generated JSON fixedInput too short');
+          conversionIssue =
+              '\$.fixedInput：生成的固定设定只有 ${fixedInput.length} 个字符，需要至少 40 个字符。';
           return null;
         }
         if (!hasPersonality && !hasAppearance) {
-          debugPrint('LLM generated JSON too sparse');
+          conversionIssue = r'$.personality / $.appearance：生成内容至少需要一项性格或外貌描述。';
           return null;
         }
-        if (currentStates is Map &&
-            currentStates.isNotEmpty &&
-            !hasCurrentStates) {
-          debugPrint('LLM generated JSON invalid currentStates');
-          return null;
-        }
-        return normalize(extracted);
+        return jsonEncode(json);
       } catch (e) {
-        debugPrint('convertNaturalLanguageToJson parse failed: $e');
+        conversionIssue = '生成内容解析失败：$e';
         return null;
       }
     }
@@ -1849,9 +1891,15 @@ class ChatProvider extends ChangeNotifier {
         profile: _providerSettings.llm,
       );
 
-      return await parseOne(retryResponse);
+      final repaired = await parseOne(retryResponse);
+      if (repaired == null) {
+        _error = 'AI 创建失败：${conversionIssue ?? '模型未返回可用的角色 JSON'}';
+        notifyListeners();
+      }
+      return repaired;
     } catch (e) {
-      debugPrint('convertNaturalLanguageToJson failed: $e');
+      _error = 'AI 创建请求失败：$e';
+      notifyListeners();
       return null;
     }
   }
@@ -1903,7 +1951,7 @@ $planSection
 必须包含字段：
 - name: $typeLabel名称，不能为空
 - fixedInput: 每轮对话固定输入给 LLM 的提示词（不少于40字）
-- currentStates: 对象，key 是用户要求或可观察到的可持续状态名，value 为初始值/""（可以为空字符串）
+- 不输出 currentStates 或 continuity；需要记录的状态由用户在编辑器中手动配置。
 
 可选字段（建议返回，缺失可置空字符串或空数组）：
 - avatar: 一个 emoji 或简短符号
@@ -1967,7 +2015,7 @@ $draftSection
 1. 必须有 name（非空）
 2. fixedInput 不能为空，且要有 >40 字，包含行为风格与边界
 3. personality 和 appearance 至少命中其中之一
-4. currentStates 如存在 key，要保证 key 非空
+4. 不输出 currentStates 或 continuity，状态记录项由用户手动配置
 5. output 只应是单个 JSON 对象，不要嵌套说明
 6. 严格 JSON 键名与目标 schema 匹配，能缺省则为空值
 
@@ -2016,7 +2064,9 @@ $draftSection
   /// 5. 解析响应并提取回复内容
   /// 6. 更新联系人记忆（memoryPatch）
   /// 7. 触发事件总结（如达到阈值）
-  Future<void> sendMessage(String rawInput) async {
+  Future<void> sendMessage(String rawInput) => _sendMessage(rawInput);
+  Future<void> _sendMessage(String rawInput,
+      {bool ownsMutation = false}) async {
     // 检查API Key是否已设置
     if (!llmProfiles.any((profile) => profile.hasApiKey)) {
       _error = '请先设置 API Key';
@@ -2033,16 +2083,27 @@ $draftSection
 
     // 格式化输入
     final input = _formatter.normalize(rawInput);
-    if (input.isEmpty || isLoading) return;
+    if (input.isEmpty ||
+        _isLoading ||
+        (_storyMutationBusy && !ownsMutation) ||
+        isLoadingOlderMessages) {
+      return;
+    }
 
     final generationCancellation = Completer<void>();
     _generationCancellation = generationCancellation;
 
     // ===== 保存快照（在修改任何状态前）=====
-    _saveSnapshot(selected);
+    if (_storyStore == null || selected.category == ContactCategory.assistant) {
+      _saveSnapshot(selected);
+    }
 
     // 创建用户消息
+    final turnId = selected.category == ContactCategory.assistant
+        ? null
+        : 'turn-${DateTime.now().microsecondsSinceEpoch}';
     final userMessage = Message(
+      turnId: turnId,
       id: 'user-${DateTime.now().microsecondsSinceEpoch}',
       role: MessageRole.user,
       content: input,
@@ -2052,8 +2113,6 @@ $draftSection
     final currentList =
         _messagesByContact.putIfAbsent(selected.id, () => <Message>[]);
     currentList.add(userMessage);
-    await _persistConversation(selected.id);
-
     // 设置加载状态
     _isLoading = true;
     _isTyping = true;
@@ -2062,13 +2121,15 @@ $draftSection
     notifyListeners();
 
     String? streamingMessageId;
+    String? responseMessageId;
     try {
-      final currentContact = selectedContact;
-      if (currentContact == null) {
-        _error = AppStrings.noContact;
-        notifyListeners();
-        return;
+      if (_storyStore != null && turnId != null) {
+        _activeStoryTurn = await _storyStore!
+            .beginStoryTurn(contactId: selected.id, userMessage: userMessage);
+      } else {
+        await _persistConversation(selected.id);
       }
+      final currentContact = selected;
 
       // 助手类型：走 opencode CLI 流程
       if (currentContact.category == ContactCategory.assistant) {
@@ -2082,10 +2143,18 @@ $draftSection
 
       // 步骤1: 固定热记忆窗口，并执行 0/1/2 次调用的事件召回状态机。
       final hotWindow = _selectPromptEventWindow(currentContact);
-      final recentRecallMessages = _recentRecallMessages(
+      final recentConversationMessages = _recentConversationMessages(
         currentList,
         currentMessageId: userMessage.id,
       );
+      final recentRecallMessages = recentConversationMessages
+          .map(
+            (message) => RecallDialogueMessage(
+              role: message.role.name,
+              content: message.content,
+            ),
+          )
+          .toList(growable: false);
       final RecallOutcome recallOutcome;
       try {
         recallOutcome = await _eventRecallCoordinator.recall(
@@ -2149,10 +2218,17 @@ $draftSection
           userInput: userMessage.content,
           systemPrompt: promptSections.cacheablePrefix,
           dynamicContext: promptSections.dynamicContext,
-          outputSchema: ChatRepository.outputSchema,
+          outputSchema: '',
         );
+        final historyDebug = jsonEncode(recentConversationMessages
+            .map((message) => <String, String>{
+                  'role': message.role.name,
+                  'content': message.content,
+                })
+            .toList(growable: false));
         currentList.add(
           Message(
+            turnId: turnId,
             id: 'debug-${DateTime.now().microsecondsSinceEpoch}',
             role: MessageRole.user,
             content: '【调试信息】事件召回\n'
@@ -2160,7 +2236,10 @@ $draftSection
                 '额外 POST: ${recallOutcome.postCount}\n'
                 '结构化词项(JSON): ${jsonEncode(recallOutcome.activeTerms)}\n'
                 '事件节点(JSON): ${jsonEncode(recallOutcome.nodes.map((node) => node.id).toList())}\n\n'
-                '【调试信息】完整 Prompt\n${structured.debugView}',
+                '【调试信息】完整请求 messages\n'
+                '【system message（可缓存前缀）】\n${structured.systemPrompt}\n\n'
+                '【历史 user/assistant messages】\n$historyDebug\n\n'
+                '【当前 user message】\n${structured.userPrompt}',
             createdAt: DateTime.now(),
           ),
         );
@@ -2180,6 +2259,7 @@ $draftSection
             userMessage: userMessage,
             systemPrompt: promptSections.cacheablePrefix,
             dynamicContext: promptSections.dynamicContext,
+            conversationHistory: recentConversationMessages,
           ),
           (chunk) {
             raw.write(chunk);
@@ -2190,6 +2270,7 @@ $draftSection
               (message) => message.id == streamingMessageId,
             );
             final draft = Message(
+              turnId: turnId,
               id: streamingMessageId!,
               role: MessageRole.assistant,
               content: partial,
@@ -2214,6 +2295,7 @@ $draftSection
           throw const AiServiceException('模型返回了空的流式响应。');
         }
         reply = Message(
+          turnId: turnId,
           id: streamingMessageId,
           role: MessageRole.assistant,
           content: rawReply,
@@ -2225,77 +2307,61 @@ $draftSection
           userMessage: userMessage,
           systemPrompt: promptSections.cacheablePrefix,
           dynamicContext: promptSections.dynamicContext,
+          conversationHistory: recentConversationMessages,
         );
       }
 
-      // 更新用户消息状态为已发送
-      _updateMessageStatus(selected.id, userMessage.id, MessageStatus.sent);
-
-      // 步骤6: 提取回复内容（从JSON中提取reply字段）
-      String? replyContent = _extractReplyFromMessage(reply);
-
-      // 如果回复过短，补一轮“强制长回复”的重试，避免一次性只给一句话。
-      if (_isReplyContentTooShort(replyContent)) {
-        try {
-          final enforcedDynamicContext =
-              '${promptSections.dynamicContext}\n\n## 本轮重试要求\n'
-              '- 上一次正文过短。本轮 reply 是最终可见内容，请给出完整自然且具备铺垫的回复，按可读性估算至少可读 $_minReplyReadingSeconds 秒以上。'
-              '\n- 需围绕 eventBrief 逐步展开，不要只给一句“已知/明白”式回应。';
-          final retryReply = await _askRoleplayWithFallback(
-            contact: selected,
-            userMessage: userMessage,
-            systemPrompt: promptSections.cacheablePrefix,
-            dynamicContext: enforcedDynamicContext,
-          );
-          final retryContent = _extractReplyFromMessage(retryReply);
-          if (!_isReplyContentTooShort(retryContent)) {
-            reply = retryReply;
-            replyContent = retryContent;
-          }
-        } on AiServiceException {
-          // 重试失败时保留第一次响应，不阻断主流程
-        }
-      }
-
-      // 检查是否成功提取到回复内容
-      if (replyContent == null) {
-        _generationStatus = ChatGenerationStatus.failure;
-        // 如果提取失败，可能是AI返回了错误消息
-        _error = 'AI 回复格式错误，请稍后重试';
-        if (isDebugMode) {
-          currentList.add(
-            Message(
-              id: 'debug-raw-${DateTime.now().microsecondsSinceEpoch}',
-              role: MessageRole.user,
-              content: '【调试信息】LLM 原生输出（格式异常，无法解析）\n${reply.content}',
-              createdAt: DateTime.now(),
-            ),
-          );
-          await _persistConversation(selected.id);
-        }
-        _updateMessageStatus(selected.id, userMessage.id, MessageStatus.failed);
-        await _persistConversation(selected.id);
-        return;
-      }
+      responseMessageId = reply.id;
+      // 不自动重生成：先在本地验证完整响应与状态增量，失败时不提交半轮。
+      final turn = RoleplayTurn.parse(
+        raw: reply.content,
+        contact: selected,
+        userInput: input,
+        // 初始化依据仅来自事实内容；协议模板里的示例不能成为剧情事实。
+        initialContext: <String>[
+          promptContact.fixedInput,
+          ...promptContact.appearance,
+          ...promptContact.currentStates.values,
+          ...promptContact.worldKnowledge.items,
+          ...promptContact.selfKnowledge.items,
+          ...promptContact.userKnowledge.items,
+          ...promptContact.belongings,
+          promptContact.time,
+          promptContact.worldBook.toPromptSection(),
+          ..._flattenGraphEvents(promptContact.eventGraph)
+              .map((e) => e.description),
+          ...promptContact.events.items.map((e) => e.description),
+          ...recentRecallMessages.map((message) => message.content),
+        ].join('\n'),
+        allowSummary: needSummary,
+      );
+      final stagedList =
+          _storyStore == null ? currentList : List<Message>.from(currentList);
+      final stagedUserIndex =
+          stagedList.indexWhere((m) => m.id == userMessage.id);
+      stagedList[stagedUserIndex] =
+          stagedList[stagedUserIndex].copyWith(status: MessageStatus.sent);
 
       final completedReply = Message(
+        turnId: turnId,
         id: reply.id,
         role: reply.role,
-        content: replyContent,
+        content: turn.reply,
         createdAt: reply.createdAt,
       );
       final streamedIndex =
-          currentList.indexWhere((message) => message.id == reply.id);
+          stagedList.indexWhere((message) => message.id == reply.id);
       if (streamedIndex < 0) {
-        currentList.add(completedReply);
+        stagedList.add(completedReply);
       } else {
-        currentList[streamedIndex] = completedReply;
+        stagedList[streamedIndex] = completedReply;
       }
 
       // 调试模式：显示 LLM 原生输出
       if (isDebugMode) {
-        currentList.add(
+        stagedList.add(
           Message(
+            turnId: turnId,
             id: 'debug-raw-${DateTime.now().microsecondsSinceEpoch}',
             role: MessageRole.user,
             content: '【调试信息】LLM 原生输出\n${reply.content}',
@@ -2307,13 +2373,23 @@ $draftSection
       // 步骤7: 更新联系人记忆
       await _updateContactFromMemoryPatch(
         selected,
-        reply.content,
-        userInput: input,
+        turn,
+        stagedMessages: stagedList,
         inputKeywords: recallOutcome.activeTerms,
         promptEventNodeIds: promptContext.eventNodeIds,
         summarySourceTier: summarySourceTier,
+        summarySourceNodeIds: cascadeDecision.sourceNodeIds,
       );
-      await _createCompletedTurnCheckpoint(selected.id, reply.id);
+      if (!identical(currentList, stagedList)) {
+        currentList
+          ..clear()
+          ..addAll(stagedList);
+      }
+      // 正文和记忆已经落盘。检查点失败不能把已提交的一轮回滚成半轮。
+      if (_storyStore == null) {
+        await _createCompletedTurnCheckpoint(selected.id, reply.id);
+      }
+      await _refreshTimeline(selected.id);
       _generationStatus = ChatGenerationStatus.completed;
     } on _GenerationCancelled {
       _error = null;
@@ -2328,8 +2404,21 @@ $draftSection
         );
       }
       await _rollbackMemoryOnFailure(selected.id);
+    } on FormatException catch (e) {
+      _generationStatus = ChatGenerationStatus.failure;
+      _error = e.message;
+      _updateMessageStatus(selected.id, userMessage.id, MessageStatus.failed);
+      final failedReplyId = responseMessageId ?? streamingMessageId;
+      if (failedReplyId != null) {
+        _updateMessageStatus(selected.id, failedReplyId, MessageStatus.failed);
+      }
+      await _rollbackMemoryOnFailure(selected.id);
     } on AiServiceException catch (e) {
       _generationStatus = ChatGenerationStatus.failure;
+      final failedReplyId = responseMessageId ?? streamingMessageId;
+      if (failedReplyId != null) {
+        _updateMessageStatus(selected.id, failedReplyId, MessageStatus.failed);
+      }
       _error = e.userMessage;
       _updateMessageStatus(selected.id, userMessage.id, MessageStatus.failed);
       _heartbeat.markReconnecting();
@@ -2339,6 +2428,7 @@ $draftSection
         final currentList = _messagesByContact[selected.id] ?? <Message>[];
         currentList.add(
           Message(
+            turnId: turnId,
             id: 'debug-raw-${DateTime.now().microsecondsSinceEpoch}',
             role: MessageRole.user,
             content: '【调试信息】LLM 原生输出（请求失败：${e.userMessage}）\n${e.rawResponse}',
@@ -2350,6 +2440,10 @@ $draftSection
       await _rollbackMemoryOnFailure(selected.id);
     } catch (e, st) {
       _generationStatus = ChatGenerationStatus.failure;
+      final failedReplyId = responseMessageId ?? streamingMessageId;
+      if (failedReplyId != null) {
+        _updateMessageStatus(selected.id, failedReplyId, MessageStatus.failed);
+      }
       debugPrint('sendMessage failed: $e');
       debugPrint('$st');
       final raw = e.toString().trim();
@@ -2360,6 +2454,7 @@ $draftSection
       await _rollbackMemoryOnFailure(selected.id);
     } finally {
       if (identical(_generationCancellation, generationCancellation)) {
+        _activeStoryTurn = null;
         _generationCancellation = null;
         _isLoading = false;
         _isTyping = false;
@@ -2434,6 +2529,17 @@ $draftSection
   ///
   /// 当消息发送失败时，用户可以点击重试
   Future<void> resendMessage(String contactId, String messageId) async {
+    if (isLoading ||
+        isLoadingOlderMessages ||
+        contactId != _selectedContactId) {
+      return;
+    }
+    if (_storyStore != null &&
+        selectedContact?.category != ContactCategory.assistant) {
+      final target = await previewDeleteMessage(messageId);
+      if (target != null) await _truncateAndResend(target, target.input);
+      return;
+    }
     final messages = _messagesByContact[contactId];
     if (messages == null) return;
 
@@ -2455,6 +2561,263 @@ $draftSection
     await sendMessage(message.content);
   }
 
+  Future<bool> _runStoryMutation(Future<bool> Function() operation) async {
+    if (isLoading || isLoadingOlderMessages) return false;
+    final contactId = _selectedContactId;
+    _storyMutationBusy = true;
+    try {
+      final result = await operation();
+      if (contactId != null && _contacts.any((c) => c.id == contactId)) {
+        if (!result) {
+          await _reloadStory(contactId);
+        } else {
+          await _refreshTimeline(contactId);
+        }
+      }
+      return result;
+    } catch (e) {
+      if (contactId != null && _contacts.any((c) => c.id == contactId)) {
+        await _reloadStory(contactId);
+      }
+      _error = '剧情修改失败：$e';
+      return false;
+    } finally {
+      _storyMutationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _reloadStory(String contactId) async {
+    for (final contact in _contacts.where((c) => c.id == contactId)) {
+      _memoryRecallService.invalidateIndex(contact.eventGraph);
+    }
+    final contacts = _persistence is PaginatedChatPersistence
+        ? await (_persistence as PaginatedChatPersistence).readContacts()
+        : (await _persistence.readSnapshot()).contacts;
+    final restored = contacts.firstWhere((c) => c.id == contactId);
+    final index = _contacts.indexWhere((c) => c.id == contactId);
+    if (index >= 0) _contacts[index] = restored;
+    if (_persistence is PaginatedChatPersistence) {
+      await _loadInitialMessagePage(contactId);
+    } else {
+      _messagesByContact[contactId] = List.from(
+          (await _persistence.readSnapshot()).messagesByContact[contactId] ??
+              []);
+    }
+    _lastMemoryRevisions.remove(contactId);
+    _lockedMemoryNodeIds.remove(contactId);
+    final revision =
+        await _persistence.readMetadata(_memoryRevisionKey(contactId));
+    if (revision != null && revision.isNotEmpty) {
+      _lastMemoryRevisions[contactId] = MemoryRevisionRecord.fromJson(
+          Map<String, dynamic>.from(jsonDecode(revision) as Map));
+    }
+    final locks = await _persistence.readMetadata(_memoryLocksKey(contactId));
+    if (locks != null && locks.isNotEmpty) {
+      _lockedMemoryNodeIds[contactId] =
+          (jsonDecode(locks) as List).cast<String>().toSet();
+    }
+    _clearSnapshot();
+    await _refreshTimeline(contactId);
+  }
+
+  Future<StoryTruncation?> previewDeleteMessage(String messageId) async {
+    final id = _selectedContactId;
+    if (id == null ||
+        isLoading ||
+        isLoadingOlderMessages ||
+        _storyStore == null) {
+      return null;
+    }
+    final target = await _storyStore!
+        .previewStoryTruncation(contactId: id, messageId: messageId);
+    if (target == null) {
+      _error = '该位置缺少可靠恢复记录，不能只删除消息而留下记忆';
+      notifyListeners();
+    }
+    return target;
+  }
+
+  Future<bool> resendStoryFrom(StoryTruncation target, String input) =>
+      input.trim().isEmpty
+          ? Future.value(false)
+          : _truncateAndResend(target, input.trim());
+
+  Future<bool> deleteStoryFrom(StoryTruncation target) =>
+      _truncateAndResend(target, null);
+
+  Future<bool> _truncateAndResend(StoryTruncation target, String? input) async {
+    if (isLoading ||
+        isLoadingOlderMessages ||
+        target.contactId != _selectedContactId ||
+        _storyStore == null) {
+      return false;
+    }
+    if (input != null && !llmProfiles.any((p) => p.hasApiKey)) {
+      _error = '请先设置 API Key';
+      notifyListeners();
+      return false;
+    }
+    _storyMutationBusy = true;
+    notifyListeners();
+    try {
+      await _storyStore!.truncateStory(target);
+      await _reloadStory(target.contactId);
+      _error = null;
+      if (input != null) await _sendMessage(input, ownsMutation: true);
+      return _error == null;
+    } catch (e) {
+      await _reloadStory(target.contactId);
+      _error = '恢复剧情失败：$e';
+      return false;
+    } finally {
+      _storyMutationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Saves an editor draft against its original snapshot, preserving journal and
+  /// event graph fields that the profile editor does not own.
+  Future<bool> updateContactProfile({
+    required Contact original,
+    required Contact draft,
+    required String? expectedBranchId,
+  }) async {
+    final contact = selectedContact;
+    if (contact == null || isLoading || isLoadingOlderMessages) {
+      _error = '正在处理对话，请稍后保存资料';
+      notifyListeners();
+      return false;
+    }
+    if (contact.id != original.id ||
+        draft.id != original.id ||
+        expectedBranchId != activeConversationBranch?.id ||
+        jsonEncode(contact.toJson()) != jsonEncode(original.toJson())) {
+      _error = '角色或分支已变化，请重新打开资料页';
+      notifyListeners();
+      return false;
+    }
+    if (draft.name.trim().isEmpty) {
+      _error = '名字不能为空';
+      notifyListeners();
+      return false;
+    }
+    _storyMutationBusy = true;
+    notifyListeners();
+    try {
+      final data = contact.toJson();
+      final edits = draft.toJson();
+      for (final key in const [
+        'name',
+        'avatar',
+        'fixedInput',
+        'personality',
+        'appearance',
+        'personalInfo',
+        'settings',
+        'backgroundStory',
+        'narrativeRules',
+        'otherCharacteristics',
+        'worldKnowledge',
+        'selfKnowledge',
+        'userKnowledge',
+        'belongings',
+        'status',
+        'mood',
+        'time',
+        'voice',
+      ]) {
+        data.remove(key);
+        if (edits.containsKey(key)) data[key] = edits[key];
+      }
+      data['name'] = draft.name.trim();
+      data.remove('currentStates');
+      data['continuity'] = ContinuityState(
+        revision: contact.continuity.revision + 1,
+        definitions: draft.continuity.definitions,
+        values: draft.continuity.values,
+      ).toJson();
+      final updated = Contact.fromJson(data);
+      final messages = _messagesByContact[contact.id] ?? <Message>[];
+      if (_persistence is PaginatedChatPersistence) {
+        await (_persistence as PaginatedChatPersistence).saveConversationTail(
+          contact: updated,
+          startSequence: _loadedStartSequenceByContact[contact.id] ?? 0,
+          messages: messages,
+        );
+      } else {
+        await _persistence.saveConversation(
+            contact: updated, messages: messages);
+      }
+      _contacts[_contacts.indexWhere((c) => c.id == contact.id)] = updated;
+      await _refreshTimeline(contact.id);
+      _error = null;
+      return true;
+    } catch (error) {
+      _error = '资料保存失败：$error';
+      return false;
+    } finally {
+      _storyMutationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> updateStoryState(ContinuityState state,
+      {String? expectedBranchId}) async {
+    final contact = selectedContact;
+    if (contact == null || isLoading || isLoadingOlderMessages) return false;
+    if (state.revision != contact.continuity.revision ||
+        (expectedBranchId != null &&
+            expectedBranchId != activeConversationBranch?.id)) {
+      _error = "故事状态已变化，请重新打开编辑器";
+      notifyListeners();
+      return false;
+    }
+    _storyMutationBusy = true;
+    final index = _contacts.indexWhere((c) => c.id == contact.id);
+    try {
+      final updated = contact.copyWith(
+          continuity: ContinuityState(
+              revision: contact.continuity.revision + 1,
+              definitions: state.definitions,
+              values: state.values));
+      // Publish to UI only after the transactional write succeeds.
+      final messages = _messagesByContact[contact.id] ?? <Message>[];
+      if (_persistence is PaginatedChatPersistence) {
+        await (_persistence as PaginatedChatPersistence).saveConversationTail(
+            contact: updated,
+            startSequence: _loadedStartSequenceByContact[contact.id] ?? 0,
+            messages: messages);
+      } else {
+        await _persistence.saveConversation(
+            contact: updated, messages: messages);
+      }
+      _contacts[index] = updated;
+      await _refreshTimeline(contact.id);
+      _error = null;
+      return true;
+    } catch (e) {
+      _error = '状态保存失败：$e';
+      return false;
+    } finally {
+      _storyMutationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  bool _canMutateMessage(Message message) =>
+      selectedContact?.category == ContactCategory.assistant ||
+      message.id.startsWith('debug-') ||
+      message.isImageMessage ||
+      message.status == MessageStatus.failed ||
+      message.status == MessageStatus.cancelled;
+
+  bool _rejectHistoryMutation() {
+    _error = '已完成的剧情需通过“修改并重新生成”或分支修改，正文和状态会一起恢复';
+    notifyListeners();
+    return false;
+  }
+
   Future<bool> editMessage(String messageId, String content) async {
     final contactId = _selectedContactId;
     final normalized = content.trim();
@@ -2463,6 +2826,18 @@ $draftSection
     final index =
         messages?.indexWhere((message) => message.id == messageId) ?? -1;
     if (messages == null || index < 0) return false;
+    if (_storyStore != null &&
+        selectedContact?.category != ContactCategory.assistant &&
+        messages[index].role == MessageRole.user &&
+        !messages[index].id.startsWith('debug-')) {
+      final target = await previewDeleteMessage(messageId);
+      return target != null && await _truncateAndResend(target, normalized);
+    }
+    if (_storyStore != null &&
+        selectedContact?.category != ContactCategory.assistant) {
+      return _rejectHistoryMutation();
+    }
+    if (!_canMutateMessage(messages[index])) return _rejectHistoryMutation();
     messages[index] = messages[index].copyWith(content: normalized);
     await _persistConversation(contactId);
     notifyListeners();
@@ -2470,12 +2845,18 @@ $draftSection
   }
 
   Future<bool> deleteMessage(String messageId) async {
+    if (_storyStore != null &&
+        selectedContact?.category != ContactCategory.assistant) {
+      final target = await previewDeleteMessage(messageId);
+      return target == null ? false : _truncateAndResend(target, null);
+    }
     final contactId = _selectedContactId;
     if (contactId == null || isLoading) return false;
     final messages = _messagesByContact[contactId];
     final index =
         messages?.indexWhere((message) => message.id == messageId) ?? -1;
     if (messages == null || index < 0) return false;
+    if (!_canMutateMessage(messages[index])) return _rejectHistoryMutation();
     messages.removeAt(index);
     await _persistConversation(contactId);
     notifyListeners();
@@ -2483,6 +2864,9 @@ $draftSection
   }
 
   Future<bool> generateReplyCandidate(String messageId) async {
+    if (selectedContact?.category != ContactCategory.assistant) {
+      return _rejectHistoryMutation();
+    }
     final contact = selectedContact;
     final messages = contact == null ? null : _messagesByContact[contact.id];
     final index =
@@ -2526,6 +2910,9 @@ $draftSection
   }
 
   Future<bool> applyReplyCandidate(String messageId, String candidate) async {
+    if (selectedContact?.category != ContactCategory.assistant) {
+      return _rejectHistoryMutation();
+    }
     final contactId = _selectedContactId;
     final messages = contactId == null ? null : _messagesByContact[contactId];
     final index =
@@ -2650,22 +3037,26 @@ $draftSection
     String? imageUrl,
     String? originalPrompt,
   }) async {
-    final messages = _messagesByContact.putIfAbsent(
-      contactId,
-      () => <Message>[],
-    );
-    final message = Message(
-      id: 'image-${DateTime.now().microsecondsSinceEpoch}',
-      role: MessageRole.assistant,
-      content: prompt,
-      createdAt: DateTime.now(),
-      imageUrl: imageUrl,
-      imagePrompt: prompt,
-      originalPrompt: originalPrompt,
-    );
-    messages.add(message);
-    await _persistConversation(contactId);
-    notifyListeners();
+    await _runStoryMutation(() async {
+      if (contactId != _selectedContactId) return false;
+      final messages = _messagesByContact.putIfAbsent(
+        contactId,
+        () => <Message>[],
+      );
+      final message = Message(
+        turnId: messages.lastOrNull?.turnId,
+        id: 'image-${DateTime.now().microsecondsSinceEpoch}',
+        role: MessageRole.assistant,
+        content: prompt,
+        createdAt: DateTime.now(),
+        imageUrl: imageUrl,
+        imagePrompt: prompt,
+        originalPrompt: originalPrompt,
+      );
+      messages.add(message);
+      await _persistConversation(contactId);
+      return true;
+    });
   }
 
   /// 更新消息状态
@@ -2710,6 +3101,12 @@ $draftSection
   /// 同时删除向量数据库中本轮对话添加的记忆条目
   /// 返回是否撤回成功
   Future<bool> recallLastTurn() async {
+    if (isLoading) return false;
+    if (_storyStore != null &&
+        selectedContact?.category != ContactCategory.assistant) {
+      final target = _latestStoryTurn;
+      return target == null ? false : _truncateAndResend(target, null);
+    }
     if (_lastContactSnapshot == null || _selectedContactId == null) {
       return false;
     }
@@ -2757,6 +3154,20 @@ $draftSection
   /// - 不回退消息列表（保留失败状态供用户查看）
   /// - 不清空快照（允许重发时使用）
   Future<void> _rollbackMemoryOnFailure(String contactId) async {
+    if (_storyStore != null &&
+        selectedContact?.category != ContactCategory.assistant) {
+      final turn = _activeStoryTurn;
+      if (turn != null) {
+        await _storyStore!.abortStoryTurn(
+            turn: turn,
+            messages: (_messagesByContact[contactId] ?? [])
+                .where((m) => m.turnId == turn.id)
+                .toList());
+        _activeStoryTurn = null;
+      }
+      await _reloadStory(contactId);
+      return;
+    }
     if (_lastContactSnapshot == null || _lastContactSnapshot!.id != contactId) {
       return;
     }
@@ -2787,27 +3198,18 @@ $draftSection
   /// 7. 持久化更新后的联系人
   Future<void> _updateContactFromMemoryPatch(
     Contact contact,
-    String response, {
-    required String userInput,
+    RoleplayTurn turn, {
+    required List<Message> stagedMessages,
     required List<String> inputKeywords,
     required List<String> promptEventNodeIds,
     // 本轮触发的级联方向：null=无强制（仅 LLM 自主输出时），
     // shortTerm = 1→2 级联（summary 入长期），
     // longTerm = 2→3 级联（summary 入超长期）
     EventTier? summarySourceTier,
+    required List<String> summarySourceNodeIds,
   }) async {
-    final patch = StructuredOutputRegexParser.extractMemoryPatch(response);
-    if (patch == null) {
-      await _persistConversation(contact.id);
-      return;
-    }
-
-    final reducedPatch = _memoryPatchReducer.reduce(
-      contact: contact,
-      patch: patch,
-      userInput: userInput,
-      rawAiResponse: response,
-    );
+    final patch = turn.patch;
+    final reducedPatch = turn.memory;
     final patchBelongings = reducedPatch.belongingChanges;
 
     // 更新事件图。关联跨轮保留，队列截断后统一清理悬空关系。
@@ -2832,9 +3234,12 @@ $draftSection
       // - 2→3：summary 入 ultra-long-term（un-summarized）；源层（长期）的旧摘要**只标 summarized，
       //          不迁层
       // 关键：每轮级联只往目标层加 1 个 summary 元素，目标层不会被旧事件淹没。
-      if (summaryEvent != null && !summaryEvent.isEmpty) {
-        // LLM 自主输出但本轮未强制级联时：按 1→2 默认处理（summary 入 long-term）
-        final sourceTier = summarySourceTier ?? EventTier.shortTerm;
+      if (summaryEvent != null &&
+          !summaryEvent.isEmpty &&
+          summarySourceTier != null &&
+          summarySourceNodeIds.isNotEmpty) {
+        // 只处理本轮请求的摘要，并绑定实际展示的源节点。
+        final sourceTier = summarySourceTier;
         final targetTier = sourceTier == EventTier.shortTerm
             ? EventTier.longTerm
             : EventTier.ultraLongTerm;
@@ -2845,7 +3250,8 @@ $draftSection
           graph: graph,
           tier: targetTier,
           event: summaryEvent,
-          nodeId: 'event-${timestamp.microsecondsSinceEpoch}',
+          nodeId:
+              'event-${_activeStoryTurn?.id ?? timestamp.microsecondsSinceEpoch}-summary',
           createdAtMs: timestamp.millisecondsSinceEpoch,
           settings: _appSettings,
         );
@@ -2856,7 +3262,10 @@ $draftSection
         //    - 不再把 N 个旧事件批量复制到目标层
         final sourceUnsummarized = _memoryGraphService
             .queueForTier(graph, sourceTier)
-            .where((e) => !e.summarized && !e.invalidated)
+            .where((e) =>
+                !e.summarized &&
+                !e.invalidated &&
+                summarySourceNodeIds.contains(e.id))
             .toList();
         graph = _memoryGraphService.linkSummarySources(
           graph: graph,
@@ -2877,7 +3286,8 @@ $draftSection
           graph: graph,
           tier: EventTier.shortTerm,
           event: briefEvent,
-          nodeId: 'event-${timestamp.microsecondsSinceEpoch}',
+          nodeId:
+              'event-${_activeStoryTurn?.id ?? timestamp.microsecondsSinceEpoch}-brief',
           createdAtMs: timestamp.millisecondsSinceEpoch,
           settings: _appSettings,
         );
@@ -2924,20 +3334,9 @@ $draftSection
     // 更新联系人数据
     final idx = _contacts.indexWhere((e) => e.id == contact.id);
     if (idx < 0) return;
-    _contacts[idx] = Contact(
-      id: contact.id,
-      name: contact.name,
-      avatar: contact.avatar,
-      category: contact.category,
-      fixedInput: contact.fixedInput,
+    final updatedContact = contact.copyWith(
       currentStates: reducedPatch.currentStates,
-      personality: contact.personality,
-      appearance: contact.appearance,
-      personalInfo: contact.personalInfo,
-      settings: contact.settings,
-      backgroundStory: contact.backgroundStory,
-      narrativeRules: contact.narrativeRules,
-      otherCharacteristics: contact.otherCharacteristics,
+      continuity: reducedPatch.continuity,
       worldKnowledge: WorldKnowledgeBucket(reducedPatch.worldKnowledge),
       selfKnowledge: SelfKnowledgeBucket(reducedPatch.selfKnowledge),
       userKnowledge: UserKnowledgeBucket(reducedPatch.userKnowledge),
@@ -2963,10 +3362,22 @@ $draftSection
       status: reducedPatch.status,
       mood: reducedPatch.mood,
       time: reducedPatch.time,
-      voice: contact.voice,
-      createdAt: contact.createdAt,
     );
-    await _persistConversation(contact.id);
+    final activeTurn = _activeStoryTurn;
+    if (_storyStore != null && activeTurn != null) {
+      await _storyStore!.commitStoryTurn(
+          turn: activeTurn,
+          contact: updatedContact,
+          messages:
+              stagedMessages.where((m) => m.turnId == activeTurn.id).toList());
+      _messageCountByContact[contact.id] = activeTurn.startSequence +
+          stagedMessages.where((m) => m.turnId == activeTurn.id).length;
+      _activeStoryTurn = null;
+      _contacts[idx] = updatedContact;
+    } else {
+      _contacts[idx] = updatedContact;
+      await _persistConversation(contact.id);
+    }
   }
 
   /// 更新关键词库（LRU 策略）
@@ -3041,7 +3452,7 @@ $draftSection
     );
   }
 
-  List<RecallDialogueMessage> _recentRecallMessages(
+  List<Message> _recentConversationMessages(
     List<Message> messages, {
     required String currentMessageId,
   }) {
@@ -3055,12 +3466,6 @@ $draftSection
               message.content.trim().isNotEmpty,
         )
         .take(4)
-        .map(
-          (message) => RecallDialogueMessage(
-            role: message.role.name,
-            content: message.content,
-          ),
-        )
         .toList(growable: false);
     return recent.reversed.toList(growable: false);
   }
@@ -3080,7 +3485,7 @@ $draftSection
     required List<EventNode> relatedNodes,
   }) {
     // 必须与 StructuredInputPromptComposer 中的编号展示顺序完全一致：
-    // 低频的历史/长期事件位于缓存前缀，短期事件位于动态尾部。
+    // 历史、长期、短期事件都位于动态区，编号顺序保持一致。
     final numberedNodes = <EventNode>[
       ...hotWindow.ultra,
       ...hotWindow.long,
@@ -3107,20 +3512,7 @@ $draftSection
       maxCount: _maxPromptListItems,
     );
 
-    final promptContact = Contact(
-      id: contact.id,
-      name: contact.name,
-      avatar: contact.avatar,
-      category: contact.category,
-      fixedInput: contact.fixedInput,
-      currentStates: contact.currentStates,
-      personality: contact.personality,
-      appearance: contact.appearance,
-      personalInfo: contact.personalInfo,
-      settings: contact.settings,
-      backgroundStory: contact.backgroundStory,
-      narrativeRules: contact.narrativeRules,
-      otherCharacteristics: contact.otherCharacteristics,
+    final promptContact = contact.copyWith(
       worldKnowledge: WorldKnowledgeBucket(worldKnowledge),
       selfKnowledge: SelfKnowledgeBucket(selfKnowledge),
       userKnowledge: UserKnowledgeBucket(userKnowledge),
@@ -3130,11 +3522,6 @@ $draftSection
         longTermQueue: hotWindow.long,
         ultraLongTermQueue: hotWindow.ultra,
       ),
-      belongings: _firstN(contact.belongings, _maxPromptListItems),
-      status: contact.status,
-      mood: contact.mood,
-      time: contact.time,
-      createdAt: contact.createdAt,
     );
     return _PromptContactContext(
       contact: promptContact,
@@ -3208,35 +3595,6 @@ $draftSection
       out.add(e);
     }
     return out;
-  }
-
-  /// 获取列表的前N个元素
-  List<String> _firstN(List<String> items, int n) =>
-      items.length <= n ? List<String>.from(items) : items.sublist(0, n);
-
-  bool _isReplyContentTooShort(String? reply) {
-    if (reply == null) return true;
-    final trimmed = reply.trim();
-    return trimmed.isEmpty ||
-        trimmed.length < _minReplyLengthFallbackChars ||
-        _estimateReadableSeconds(trimmed) < _minReplyReadingSeconds;
-  }
-
-  double _estimateReadableSeconds(String text) {
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) return 0;
-
-    final chineseChars = RegExp(r'[\u4e00-\u9fff]').allMatches(trimmed).length;
-    final englishWords = RegExp(r"\b[A-Za-z']+\b").allMatches(trimmed).length;
-
-    final chineseSeconds = chineseChars / _readabilityChineseCharsPerSecond;
-    final englishSeconds = englishWords / _readabilityEnglishWordsPerSecond;
-    return chineseSeconds + englishSeconds;
-  }
-
-  String? _extractReplyFromMessage(Message message) {
-    return StructuredOutputRegexParser.extractReply(message.content) ??
-        (message.content.trim().isEmpty ? null : message.content.trim());
   }
 
   /// 合并系统提示词和联系人信息

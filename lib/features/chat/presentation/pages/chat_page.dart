@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import '../../domain/services/contact_import_parser.dart';
+import '../widgets/contact_json_preview_dialog.dart';
 
 import '../../../../app_router.dart';
 import '../../../../core/data/models/provider_settings.dart';
+import '../../../../core/presentation/pages/provider_settings_page.dart';
 import '../../application/chat_media_controller.dart';
 import '../../application/chat_view_state.dart';
 import '../../data/models/contact.dart';
@@ -17,6 +19,7 @@ import '../widgets/chat_message_list.dart';
 import '../widgets/chat_shell.dart';
 import '../widgets/chat_status_views.dart';
 import '../widgets/message_composer.dart';
+import 'contact_profile_page.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
@@ -83,10 +86,32 @@ class _ChatPageState extends State<ChatPage> {
     await _provider.sendMessage(input);
   }
 
+  Future<void> _openContactProfile() async {
+    final contact = _provider.selectedContact;
+    if (contact == null) return;
+    if (_provider.isLoading) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请先停止生成，再修改资料')));
+      return;
+    }
+    final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => ContactProfilePage(provider: _provider, contact: contact),
+    ));
+    if (saved == true && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('资料已保存')));
+    }
+  }
+
   /// 打开 API 提供商设置页（LLM / 生图 / TTS）
   Future<void> _openApiSettingDialog() async {
-    final saved = await Navigator.of(context).pushNamed<ProviderSettings>(
-      AppRoutes.providerSettings,
+    final saved = await Navigator.of(context).push<ProviderSettings>(
+      MaterialPageRoute<ProviderSettings>(
+        settings: const RouteSettings(name: AppRoutes.providerSettings),
+        builder: (_) => ProviderSettingsPage(
+          initial: _provider.providerSettings,
+        ),
+      ),
     );
     if (saved == null) return;
     await _provider.saveProviderSettings(saved);
@@ -155,15 +180,24 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _editAndRegenerateLastTurn() async {
+    if (_provider.selectedContact?.category != ContactCategory.assistant) {
+      final message = _provider.messages
+          .where(
+              (m) => m.role == MessageRole.user && !m.id.startsWith('debug-'))
+          .lastOrNull;
+      if (message != null) await _editMessage(message);
+      return;
+    }
     final original = _provider.lastTurnUserInput;
     if (original == null) return;
-    final controller = TextEditingController(text: original);
+    var draft = original;
     final edited = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('修改上一轮并重新生成'),
-        content: TextField(
-          controller: controller,
+        content: TextFormField(
+          initialValue: draft,
+          onChanged: (value) => draft = value,
           minLines: 3,
           maxLines: 8,
           decoration: const InputDecoration(
@@ -177,13 +211,12 @@ class _ChatPageState extends State<ChatPage> {
             child: const Text('取消'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            onPressed: () => Navigator.pop(context, draft.trim()),
             child: const Text('重新生成'),
           ),
         ],
       ),
     );
-    controller.dispose();
     if (edited == null || edited.isEmpty) return;
     final ok = await _provider.regenerateLastTurn(editedInput: edited);
     if (!mounted) return;
@@ -242,18 +275,56 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  Future<void> _resendMessage(Message message) async {
+    final id = _provider.selectedContactId;
+    if (id == null) return;
+    if (_provider.selectedContact?.category == ContactCategory.assistant) {
+      await _provider.resendMessage(id, message.id);
+      return;
+    }
+    final target = await _provider.previewDeleteMessage(message.id);
+    if (target == null || !mounted) return;
+    final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+              title: const Text('重发本轮'),
+              content: Text('将撤销本轮及后续共 ${target.turnCount} 轮对话和记忆，再用原输入重新生成。'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('取消')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('重发'))
+              ],
+            ));
+    if (confirmed == true) {
+      await _provider.resendStoryFrom(target, target.input);
+    }
+  }
+
   Future<void> _editMessage(Message message) async {
-    final controller = TextEditingController(text: message.content);
+    final story =
+        _provider.selectedContact?.category != ContactCategory.assistant &&
+            message.role == MessageRole.user;
+    final target =
+        story ? await _provider.previewDeleteMessage(message.id) : null;
+    if (!mounted || (story && target == null)) return;
+    var draft = message.content;
     final edited = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('编辑消息'),
-        content: TextField(
-          controller: controller,
+        title: Text(story ? '修改后重发（撤销 ${target!.turnCount} 轮）' : '编辑消息'),
+        content: TextFormField(
+          initialValue: draft,
+          onChanged: (value) => draft = value,
           autofocus: true,
           minLines: 2,
           maxLines: 10,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
+          decoration: InputDecoration(
+              border: const OutlineInputBorder(),
+              helperText: story ? '将先恢复到本轮之前，再使用新输入生成。' : null,
+              helperMaxLines: 2),
         ),
         actions: [
           TextButton(
@@ -261,36 +332,49 @@ class _ChatPageState extends State<ChatPage> {
             child: const Text('取消'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('保存'),
+            onPressed: () => Navigator.pop(context, draft.trim()),
+            child: Text(story ? '修改并重发' : '保存'),
           ),
         ],
       ),
     );
-    controller.dispose();
     if (edited == null || edited.isEmpty) return;
-    await _provider.editMessage(message.id, edited);
+    if (story) {
+      await _provider.resendStoryFrom(target!, edited);
+    } else {
+      await _provider.editMessage(message.id, edited);
+    }
   }
 
   Future<void> _deleteMessage(Message message) async {
+    final story =
+        _provider.selectedContact?.category != ContactCategory.assistant;
+    final target =
+        story ? await _provider.previewDeleteMessage(message.id) : null;
+    if (!mounted || (story && target == null)) return;
     final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除消息'),
-        content: const Text('这条消息将从当前分支永久删除。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) await _provider.deleteMessage(message.id);
+        context: context,
+        builder: (context) => AlertDialog(
+              title: Text(story ? '删除本轮及之后内容' : '删除消息'),
+              content: Text(story
+                  ? '将撤销 ${target!.turnCount} 轮对话及之后的状态修改，消息和记忆一起恢复到本轮之前。其他分支不受影响。'
+                  : '这条消息将从当前会话删除。'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('取消')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('删除'))
+              ],
+            ));
+    if (confirmed == true) {
+      if (story) {
+        await _provider.deleteStoryFrom(target!);
+      } else {
+        await _provider.deleteMessage(message.id);
+      }
+    }
   }
 
   Future<void> _generateCandidate(Message message) async {
@@ -358,13 +442,15 @@ class _ChatPageState extends State<ChatPage> {
       if (jsonStr == null) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('AI 转换失败，请检查描述或稍后重试')));
+        ).showSnackBar(
+            SnackBar(content: Text(_provider.error ?? 'AI 转换失败，请稍后重试')));
         return;
       }
 
       final reviewed = await _previewGeneratedJson(
         categoryLabel: categoryLabel,
         generatedJson: jsonStr,
+        draft: result,
       );
       if (reviewed == null) return;
 
@@ -377,13 +463,14 @@ class _ChatPageState extends State<ChatPage> {
         fallbackFixedInput:
             result.fixedInput.isNotEmpty ? result.fixedInput : null,
         fallbackCurrentStates: result.currentStates,
+        fallbackContinuity: result.continuity,
         fallbackVoice: result.voice,
       );
       if (!mounted) return;
 
       if (!ok) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('创建失败：生成的 JSON 无效或 ID 已存在')),
+          SnackBar(content: Text(_provider.error ?? '创建未完成，请稍后重试')),
         );
         return;
       }
@@ -399,6 +486,7 @@ class _ChatPageState extends State<ChatPage> {
       final reviewed = await _previewGeneratedJson(
         categoryLabel: '$categoryLabel（JSON）',
         generatedJson: result.jsonString!,
+        draft: result,
       );
       if (reviewed == null) return;
 
@@ -411,13 +499,15 @@ class _ChatPageState extends State<ChatPage> {
         fallbackFixedInput:
             result.fixedInput.isNotEmpty ? result.fixedInput : null,
         fallbackCurrentStates: result.currentStates,
+        fallbackContinuity: result.continuity,
         fallbackVoice: result.voice,
       );
       if (!mounted) return;
       if (!ok) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('创建失败：JSON 格式错误')));
+        ).showSnackBar(
+            SnackBar(content: Text(_provider.error ?? '创建未完成，请稍后重试')));
         return;
       }
       ScaffoldMessenger.of(
@@ -429,6 +519,7 @@ class _ChatPageState extends State<ChatPage> {
         avatar: result.avatar,
         fixedInput: result.fixedInput,
         currentStates: result.currentStates,
+        continuity: result.continuity,
         category: result.category,
         voice: result.voice,
       );
@@ -448,59 +539,24 @@ class _ChatPageState extends State<ChatPage> {
   Future<String?> _previewGeneratedJson({
     required String categoryLabel,
     required String generatedJson,
-  }) async {
-    final controller = TextEditingController(text: generatedJson);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('AI 生成$categoryLabel JSON（可编辑）'),
-        content: SizedBox(
-          width: 760,
-          child: SizedBox(
-            height: 420,
-            child: TextField(
-              controller: controller,
-              minLines: null,
-              maxLines: null,
-              maxLength: null,
-              expands: true,
-              keyboardType: TextInputType.multiline,
-              style: const TextStyle(fontFamily: 'monospace', height: 1.25),
-              decoration: const InputDecoration(
-                alignLabelWithHint: true,
-                border: OutlineInputBorder(),
-                labelText: 'JSON 内容',
-                helperText: '支持直接编辑，确保 JSON 合法。将直接用于角色创建。',
-              ),
-            ),
+    required ContactDraft draft,
+  }) =>
+      showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => ContactJsonPreviewDialog(
+          title: '$categoryLabel JSON（检查并创建）',
+          source: generatedJson,
+          fallback: ContactImportFallback(
+            name: draft.name,
+            avatar: draft.avatar,
+            fixedInput: draft.fixedInput,
+            currentStates: draft.currentStates,
+            continuity: draft.continuity,
+            voice: draft.voice,
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: controller.text));
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('AI 生成 JSON 已复制到剪贴板')),
-              );
-            },
-            child: const Text('复制'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const Text('使用该 JSON 创建'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return result;
-  }
-
+      );
   Future<void> _recallLastTurn() async {
     if (!_provider.canRecall) return;
     final confirmed = await showDialog<bool>(
@@ -606,7 +662,9 @@ class _ChatPageState extends State<ChatPage> {
         final compact = MediaQuery.of(context).size.width < 900;
         return ChatShell(
           compact: compact,
-          title: selected?.name ?? 'Chat Demo',
+          title: selected?.name ?? 'AI 角色对话',
+          avatar: selected?.avatar ?? '',
+          onEditProfile: selected == null ? null : _openContactProfile,
           actions: _buildActions(
             compact: compact,
             hasContact: selected != null,
@@ -780,6 +838,13 @@ class _ChatPageState extends State<ChatPage> {
     return ContactSidebar(
       contacts: state.contacts,
       selectedContactId: state.selectedContactId,
+      onEdit: (id) async {
+        if (compact) Navigator.of(context).pop();
+        await _provider.selectContact(id);
+        if (mounted && _provider.selectedContactId == id) {
+          await _openContactProfile();
+        }
+      },
       onSelect: compact
           ? (id) {
               _onSelectContact(id);
@@ -811,6 +876,8 @@ class _ChatPageState extends State<ChatPage> {
           child: selected == null || state.messages.isEmpty
               ? ChatEmptyState(hasContact: selected != null)
               : ChatMessageList(
+                  protectContinuity: _provider.selectedContact?.category !=
+                      ContactCategory.assistant,
                   messages: state.messages,
                   controller: _scrollController,
                   isTyping: state.isTyping,
@@ -819,12 +886,7 @@ class _ChatPageState extends State<ChatPage> {
                   totalMessageCount: state.totalMessageCount,
                   canRegenerateLastTurn: state.canRegenerateLastTurn,
                   onLoadOlder: _loadOlderMessages,
-                  onRetry: (message) {
-                    final contactId = _provider.selectedContactId;
-                    if (contactId != null) {
-                      _provider.resendMessage(contactId, message.id);
-                    }
-                  },
+                  onRetry: _resendMessage,
                   onGenerateImage: _generateImageForMessage,
                   onRegenerate: _editAndRegenerateLastTurn,
                   canCreateBranch: (message) =>
@@ -836,6 +898,8 @@ class _ChatPageState extends State<ChatPage> {
                   onStopSpeak: _stopSpeaking,
                   isSpeaking: _mediaController.isSpeaking,
                   assistantLabel: selected.name,
+                  assistantAvatar: selected.avatar,
+                  onEditProfile: _openContactProfile,
                   onEdit: _editMessage,
                   onDelete: _deleteMessage,
                   onQuote: _quoteMessage,
@@ -844,7 +908,6 @@ class _ChatPageState extends State<ChatPage> {
                 ),
         ),
         if (state.error != null) ChatErrorBanner(message: state.error!),
-        const Divider(height: 1),
         MessageComposer(
           controller: _inputController,
           enabled: selected != null,

@@ -1,0 +1,21 @@
+# v2.5.1 · 布局与毛玻璃
+
+红圈中的图标是 LLM Profile 切换入口，现已从主界面移除。点击右上角“聊天操作 → 切换模型”打开底部选择面板，可查看当前模型并切换。手机保留 API 配置快捷入口；桌面额外保留搜索，其余低频操作统一归入更多菜单。
+
+输入栏、联系人侧栏和资料页的身份卡片使用圆角裁切的局部背景模糊、半透明渐变与细高光边框。聊天和资料内容区域加入静态蓝紫背景，正文气泡保持不透明。长消息列表不逐项应用模糊，也没有新增持续运行的背景动画。
+
+预览来自实际 Flutter 渲染：
+
+- [深色聊天](../reports/ui-v2.5.1/chat-dark.png)
+- [浅色聊天](../reports/ui-v2.5.1/chat-light.png)
+- [身份卡片](../reports/ui-v2.5.1/profile-light.png)
+- [联系人侧栏](../reports/ui-v2.5.1/sidebar-light.png)
+- [模型选择面板](../reports/ui-v2.5.1/model-picker-dark.png)
+
+模型菜单跳转和实际切换、API 设置输入、资料入口与保存、窄屏大字体通过回归测试。渲染截图不代表真机帧率测试。
+
+验收结果：静态分析无问题，362 项测试全部通过，APK 版本 2.5.1+11 与 v2 签名验证通过。交付包与构建输出 SHA-256 一致：
+
+`58edf4d471dd1a3106c29d78b3057909b6da04658465a22bb5408314318f61a5`
+
+[安装包](https://github.com/shoelace66/ai_roleplay_chat/releases/download/v2.5.1/ai-roleplay-chat-v2.5.1-glass-ui.apk)

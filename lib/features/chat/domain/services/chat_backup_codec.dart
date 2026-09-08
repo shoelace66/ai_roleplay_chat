@@ -8,7 +8,7 @@ import '../../data/models/message.dart';
 class ChatBackupCodec {
   const ChatBackupCodec();
 
-  static const int currentVersion = 2;
+  static const int currentVersion = 3;
   static const int maxImportBytes = 50 * 1024 * 1024;
 
   String encode(
@@ -108,6 +108,7 @@ class ChatBackupCodec {
 
   Map<String, dynamic> _encodeTimeline(ConversationTimelineArchive archive) {
     return <String, dynamic>{
+      'journal': archive.journal,
       'branches': <Map<String, dynamic>>[
         for (final snapshot in archive.branches)
           <String, dynamic>{
@@ -136,6 +137,7 @@ class ChatBackupCodec {
             'createdAt':
                 snapshot.checkpoint.createdAt.toUtc().toIso8601String(),
             'isKey': snapshot.checkpoint.isKey,
+            'storyRevision': snapshot.checkpoint.storyRevision,
             'contact': snapshot.contact.toJson(),
             'messages':
                 snapshot.messages.map((message) => message.toJson()).toList(),
@@ -214,6 +216,7 @@ class ChatBackupCodec {
           createdAt: DateTime.parse(item['createdAt'].toString()),
           messageCount: checkpointMessages.length,
           isKey: item['isKey'] == true,
+          storyRevision: item['storyRevision'] as int?,
         ),
         contact: contact,
         messages: checkpointMessages,
@@ -222,6 +225,9 @@ class ChatBackupCodec {
     return ConversationTimelineArchive(
       branches: branches,
       checkpoints: checkpoints,
+      journal: timeline['journal'] is Map
+          ? Map<String, dynamic>.from(timeline['journal'] as Map)
+          : const {},
     );
   }
 

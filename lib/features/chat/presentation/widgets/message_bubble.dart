@@ -2,12 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../data/models/message.dart';
+import 'contact_avatar.dart';
 
 class MessageBubble extends StatelessWidget {
   const MessageBubble({
     super.key,
     required this.message,
     this.authorLabel,
+    this.avatar = '',
+    this.onEditProfile,
+    this.allowHistoryEdits = true,
+    this.allowCandidates = true,
+    this.storyDeletion = false,
     required this.onRetry,
     required this.onGenerateImage,
     required this.onSpeak,
@@ -22,8 +28,13 @@ class MessageBubble extends StatelessWidget {
     this.onCreateBranch,
   });
 
+  final bool storyDeletion;
+  final bool allowHistoryEdits;
+  final bool allowCandidates;
   final Message message;
   final String? authorLabel;
+  final String avatar;
+  final VoidCallback? onEditProfile;
   final VoidCallback onRetry;
   final VoidCallback onGenerateImage;
   final VoidCallback? onRegenerate;
@@ -55,20 +66,27 @@ class MessageBubble extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (!isUser) _Avatar(label: label),
-              Expanded(
+              if (!isUser)
+                Padding(
+                  padding: const EdgeInsets.only(right: 10, bottom: 8),
+                  child: ContactAvatar(
+                      avatar: avatar,
+                      name: label,
+                      size: 36,
+                      onTap: onEditProfile),
+                ),
+              Flexible(
                 child: Container(
                   margin: const EdgeInsets.symmetric(vertical: 6),
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                   decoration: BoxDecoration(
                     color: isDebug
-                        ? Colors.amber.shade50
+                        ? theme.colorScheme.tertiaryContainer
                         : isUser
                             ? message.status == MessageStatus.failed
-                                ? Colors.red.shade50
-                                : theme.colorScheme.primary
-                                    .withValues(alpha: 0.15)
-                            : theme.colorScheme.surfaceContainerHighest,
+                                ? theme.colorScheme.errorContainer
+                                : theme.colorScheme.primaryContainer
+                            : theme.colorScheme.surface,
                     borderRadius: BorderRadius.only(
                       topLeft: const Radius.circular(18),
                       topRight: const Radius.circular(18),
@@ -86,7 +104,7 @@ class MessageBubble extends StatelessWidget {
                           style: theme.textTheme.labelSmall?.copyWith(
                             fontWeight: FontWeight.w600,
                             color: isDebug
-                                ? Colors.amber.shade900
+                                ? theme.colorScheme.onTertiaryContainer
                                 : theme.colorScheme.onSurface
                                     .withValues(alpha: 0.7),
                           ),
@@ -94,7 +112,7 @@ class MessageBubble extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           message.content,
-                          style: const TextStyle(fontSize: 15, height: 1.4),
+                          style: const TextStyle(fontSize: 15, height: 1.65),
                           maxLines: null,
                         ),
                         const SizedBox(height: 6),
@@ -135,7 +153,6 @@ class MessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
-              if (isUser) const _Avatar(label: '我'),
             ],
           ),
         ),
@@ -174,23 +191,26 @@ class MessageBubble extends StatelessWidget {
                 onQuote();
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('编辑'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                onEdit();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.auto_fix_high_outlined),
-              title: const Text('生成候选回复'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                onGenerateCandidate();
-              },
-            ),
-            if (onShowCandidates != null)
+            if (allowHistoryEdits ||
+                (storyDeletion && message.role == MessageRole.user && !isDebug))
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: Text(storyDeletion ? '修改后重发' : '编辑'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  onEdit();
+                },
+              ),
+            if (allowCandidates)
+              ListTile(
+                leading: const Icon(Icons.auto_fix_high_outlined),
+                title: const Text('生成候选回复'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  onGenerateCandidate();
+                },
+              ),
+            if (allowCandidates && onShowCandidates != null)
               ListTile(
                 leading: const Icon(Icons.library_books_outlined),
                 title: Text('查看候选（${message.alternatives.length}）'),
@@ -199,16 +219,17 @@ class MessageBubble extends StatelessWidget {
                   onShowCandidates!();
                 },
               ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline),
-              title: const Text('删除'),
-              textColor: Theme.of(context).colorScheme.error,
-              iconColor: Theme.of(context).colorScheme.error,
-              onTap: () {
-                Navigator.pop(sheetContext);
-                onDelete();
-              },
-            ),
+            if (allowHistoryEdits || storyDeletion)
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: Text(storyDeletion ? '删除本轮及之后内容' : '删除'),
+                textColor: Theme.of(context).colorScheme.error,
+                iconColor: Theme.of(context).colorScheme.error,
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  onDelete();
+                },
+              ),
             if (!isUser && !isDebug)
               ListTile(
                 leading: const Icon(Icons.image_outlined),
@@ -346,7 +367,18 @@ class _TypingBubbleState extends State<TypingBubble>
     _controller = AnimationController(
       duration: const Duration(milliseconds: 1200),
       vsync: this,
-    )..repeat(reverse: true);
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+      _controller.value = 1;
+    } else {
+      _controller.repeat(reverse: true);
+    }
   }
 
   @override
@@ -381,37 +413,27 @@ class _TypingBubbleState extends State<TypingBubble>
 }
 
 class AnimatedMessageBubble extends StatelessWidget {
-  const AnimatedMessageBubble({super.key, required this.child});
+  const AnimatedMessageBubble(
+      {super.key, required this.child, this.enabled = true});
 
   final Widget child;
+  final bool enabled;
 
   @override
-  Widget build(BuildContext context) => child;
-}
-
-class _Avatar extends StatelessWidget {
-  const _Avatar({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8),
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
-          shape: BoxShape.circle,
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label.isEmpty ? '?' : label.characters.take(2).join(),
-          style: const TextStyle(fontWeight: FontWeight.bold),
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      );
+  Widget build(BuildContext context) {
+    if (!enabled || MediaQuery.disableAnimationsOf(context)) return child;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      child: child,
+      builder: (context, value, child) => Opacity(
+        opacity: value,
+        child: Transform.translate(
+            offset: Offset(0, 10 * (1 - value)), child: child),
+      ),
+    );
+  }
 }
 
 class _MessageStatusIcon extends StatelessWidget {

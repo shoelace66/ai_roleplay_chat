@@ -20,6 +20,6 @@ void main() {
     );
 
     // Verify that our app title is present
-    expect(find.text('Chat Demo'), findsOneWidget);
+    expect(find.text('AI 角色对话'), findsOneWidget);
   });
 }

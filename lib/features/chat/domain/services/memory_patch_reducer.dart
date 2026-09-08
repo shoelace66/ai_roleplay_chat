@@ -1,7 +1,9 @@
 import '../../../../core/utils/structured_output_regex_parser.dart';
 import '../../data/models/contact.dart';
+import '../../data/models/continuity_state.dart';
+import 'continuity_state_machine.dart';
 
-enum BelongingChangeType { added, mentioned }
+enum BelongingChangeType { added, mentioned, removed }
 
 class BelongingChange {
   const BelongingChange({required this.type, required this.name});
@@ -19,6 +21,7 @@ class MemoryPatchResult {
     required this.userKnowledge,
     required this.status,
     required this.currentStates,
+    required this.continuity,
     required this.belongingChanges,
     required this.belongings,
     required this.mood,
@@ -32,6 +35,7 @@ class MemoryPatchResult {
   final List<String> userKnowledge;
   final List<String> status;
   final Map<String, String> currentStates;
+  final ContinuityState continuity;
   final List<BelongingChange> belongingChanges;
   final List<String> belongings;
   final String mood;
@@ -55,40 +59,73 @@ class MemoryPatchReducer {
     required Map<String, dynamic> patch,
     required String userInput,
     required String rawAiResponse,
+    String initialContext = '',
+    bool allowSummary = true,
   }) {
+    var transition = patch['stateTransition'];
+    if (transition == null && patch['currentStates'] is Map) {
+      final values = _readStateValues(patch['currentStates']);
+      final changes = <Map<String, dynamic>>[];
+      for (final d in contact.continuity.definitions) {
+        if (values.containsKey(d.name)) {
+          changes.add({
+            'key': d.id,
+            'from': contact.continuity.values[d.id] ?? d.initialValue,
+            'to': values[d.name]
+          });
+        }
+      }
+      transition = {
+        'baseRevision': contact.continuity.revision,
+        'changes': changes
+      };
+    }
+    final state = const ContinuityStateMachine()
+        .apply(current: contact.continuity, transition: transition);
     final sourceDialog = _buildSourceDialog(userInput, rawAiResponse);
-    final summary = _readEvent(patch['summary'], sourceDialog: sourceDialog);
+    final summary = allowSummary
+        ? _readEvent(patch['summary'], sourceDialog: sourceDialog)
+        : null;
     final turnEvent = _readEvent(
       patch['eventBrief'],
       sourceDialog: sourceDialog,
     );
     final belongingChanges = _readBelongingChanges(
-      StructuredOutputRegexParser.extractStringList(patch, 'belongings'),
+      legacyValues:
+          StructuredOutputRegexParser.extractStringList(patch, 'belongings'),
+      structuredValues: patch['belongingChanges'],
     );
 
     return MemoryPatchResult(
       summary: summary,
       turnEvent: turnEvent,
-      worldKnowledge: _mergeUnique(
+      worldKnowledge: _applyKnowledgeChanges(
         contact.worldKnowledge.items,
-        StructuredOutputRegexParser.extractStringList(patch, 'worldKnowledge'),
+        legacyAdds: StructuredOutputRegexParser.extractStringList(
+            patch, 'worldKnowledge'),
+        structuredValues: patch['knowledgeChanges'],
+        scope: 'world',
       ),
-      selfKnowledge: _mergeUnique(
+      selfKnowledge: _applyKnowledgeChanges(
         contact.selfKnowledge.items,
-        StructuredOutputRegexParser.extractStringList(patch, 'selfKnowledge'),
+        legacyAdds: StructuredOutputRegexParser.extractStringList(
+            patch, 'selfKnowledge'),
+        structuredValues: patch['knowledgeChanges'],
+        scope: 'self',
       ),
-      userKnowledge: _mergeUnique(
+      userKnowledge: _applyKnowledgeChanges(
         contact.userKnowledge.items,
-        StructuredOutputRegexParser.extractStringList(patch, 'userKnowledge'),
+        legacyAdds: StructuredOutputRegexParser.extractStringList(
+            patch, 'userKnowledge'),
+        structuredValues: patch['knowledgeChanges'],
+        scope: 'user',
       ),
       status: _mergeUnique(
         contact.status,
         StructuredOutputRegexParser.extractStringList(patch, 'status'),
       ),
-      currentStates: _mergeCurrentStates(
-        contact.currentStates,
-        StructuredOutputRegexParser.extractStringMap(patch, 'currentStates'),
-      ),
+      currentStates: state.byName,
+      continuity: state,
       belongingChanges: belongingChanges,
       belongings: _applyBelongingChanges(
         contact.belongings,
@@ -129,10 +166,13 @@ class MemoryPatchReducer {
     return lines.join('\n');
   }
 
-  List<BelongingChange> _readBelongingChanges(List<String> values) {
+  List<BelongingChange> _readBelongingChanges({
+    required List<String> legacyValues,
+    required dynamic structuredValues,
+  }) {
     final result = <BelongingChange>[];
     final pattern = RegExp(r'^[\(（]\s*(新增|提及)\s*[\)）]\s*(.+)$');
-    for (final value in values) {
+    for (final value in legacyValues) {
       final match = pattern.firstMatch(value);
       final name = match?.group(2)?.trim() ?? '';
       if (match == null || name.isEmpty) continue;
@@ -142,6 +182,21 @@ class MemoryPatchReducer {
             : BelongingChangeType.mentioned,
         name: name,
       ));
+    }
+    if (structuredValues is List) {
+      for (final raw in structuredValues) {
+        if (raw is! Map) continue;
+        final operation = (raw['operation'] ?? '').toString().trim();
+        final item = (raw['item'] ?? '').toString().trim();
+        if (item.isEmpty) continue;
+        final type = switch (operation) {
+          'add' => BelongingChangeType.added,
+          'mention' => BelongingChangeType.mentioned,
+          'remove' => BelongingChangeType.removed,
+          _ => null,
+        };
+        if (type != null) result.add(BelongingChange(type: type, name: item));
+      }
     }
     return result;
   }
@@ -153,23 +208,55 @@ class MemoryPatchReducer {
     final result = <String>[...current];
     for (final change in changes) {
       result.removeWhere((item) => item == change.name);
-      result.add(change.name);
+      if (change.type != BelongingChangeType.removed) {
+        result.add(change.name);
+      }
     }
     return result;
   }
 
-  Map<String, String> _mergeCurrentStates(
-    Map<String, String> current,
-    Map<String, String> patch,
-  ) {
-    final result = Map<String, String>.from(current);
-    for (final entry in patch.entries) {
-      final key = entry.key.trim();
-      if (key.isEmpty || !result.containsKey(key)) continue;
-      result[key] = entry.value.trim();
+  List<String> _applyKnowledgeChanges(
+    List<String> current, {
+    required List<String> legacyAdds,
+    required dynamic structuredValues,
+    required String scope,
+  }) {
+    final result = _mergeUnique(current, legacyAdds);
+    if (structuredValues is! List) return result;
+    for (final raw in structuredValues) {
+      if (raw is! Map || raw['scope']?.toString().trim() != scope) continue;
+      final operation = (raw['operation'] ?? '').toString().trim();
+      final from = (raw['from'] ?? '').toString().trim();
+      final to = (raw['to'] ?? '').toString().trim();
+      switch (operation) {
+        case 'add':
+          if (to.isNotEmpty && !result.contains(to)) result.add(to);
+          break;
+        case 'remove':
+          if (from.isNotEmpty) result.removeWhere((item) => item == from);
+          break;
+        case 'replace':
+          if (from.isEmpty || to.isEmpty) break;
+          final index = result.indexOf(from);
+          if (index < 0) break;
+          result[index] = to;
+          final first = result.indexOf(to);
+          for (var i = result.length - 1; i > first; i--) {
+            if (result[i] == to) result.removeAt(i);
+          }
+          break;
+      }
     }
     return result;
   }
+
+  Map<String, String> _readStateValues(dynamic value) => value is Map
+      ? <String, String>{
+          for (final entry in value.entries)
+            if (entry.key is String && entry.value is String)
+              entry.key as String: entry.value as String,
+        }
+      : const <String, String>{};
 
   List<String> _mergeUnique(List<String> current, List<String> patch) {
     final result = <String>[];

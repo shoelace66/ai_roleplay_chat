@@ -7,22 +7,29 @@ import '../../domain/repositories/chat_persistence.dart';
 import '../../domain/repositories/conversation_timeline.dart';
 import '../models/contact.dart';
 import '../models/message.dart';
+import '../../domain/repositories/story_turn_persistence.dart';
+import '../../domain/services/reversible_json_delta.dart';
+import '../../domain/services/memory_revision_service.dart';
+
+part 'sqlite_story_journal.dart';
 
 class SqliteChatPersistence
     implements
         ChatPersistence,
         PaginatedChatPersistence,
         SearchableChatPersistence,
-        ConversationTimelinePersistence {
+        ConversationTimelinePersistence,
+        StoryTurnPersistence {
   SqliteChatPersistence({
     DatabaseFactory? databaseFactory,
     String? databasePath,
   })  : _factory = databaseFactory ?? databaseFactorySqflitePlugin,
         _databasePath = databasePath;
 
-  static const int schemaVersion = 3;
+  static const int schemaVersion = 4;
   static const String defaultDatabaseName = 'ai_roleplay_chat.db';
 
+  late final _StoryJournal _journal = _StoryJournal(this);
   final DatabaseFactory _factory;
   final String? _databasePath;
   Database? _database;
@@ -136,6 +143,7 @@ CREATE TABLE app_meta (
 )
 ''');
     await _createTimelineSchema(db);
+    await _journal.schema(db);
   }
 
   Future<void> _createTimelineSchema(Database db) async {
@@ -176,6 +184,7 @@ CREATE TABLE IF NOT EXISTS conversation_checkpoints (
   message_count INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
   is_key INTEGER NOT NULL DEFAULT 0,
+  story_revision INTEGER,
   FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE CASCADE,
   FOREIGN KEY(branch_id) REFERENCES conversation_branches(id) ON DELETE CASCADE
 )
@@ -188,6 +197,13 @@ CREATE TABLE IF NOT EXISTS conversation_checkpoints (
 
   Future<void> _upgradeSchema(
       Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 4) {
+      await _journal.schema(db);
+      if (oldVersion >= 3) {
+        await db.execute(
+            'ALTER TABLE conversation_checkpoints ADD COLUMN story_revision INTEGER');
+      }
+    }
     if (oldVersion < 2) {
       await db.execute(
         'ALTER TABLE event_nodes ADD COLUMN invalidated INTEGER NOT NULL DEFAULT 0',
@@ -347,20 +363,23 @@ CREATE TABLE IF NOT EXISTS conversation_checkpoints (
   @override
   Future<void> replaceSnapshot(ChatSnapshot snapshot) async {
     try {
-      await _db.transaction((txn) async {
-        await txn.delete('contacts');
-        for (final contact in snapshot.contacts) {
-          await _writeContact(txn, contact);
-          await _writeMessages(
-            txn,
-            contact.id,
-            snapshot.messagesByContact[contact.id] ?? const <Message>[],
-          );
-          await _syncActiveBranchSnapshot(txn, contact);
-        }
-      });
+      await _db.transaction((txn) => _replaceSnapshotTx(txn, snapshot));
     } catch (error) {
       throw ChatStorageException('replaceSnapshot', error);
+    }
+  }
+
+  Future<void> _replaceSnapshotTx(
+      DatabaseExecutor txn, ChatSnapshot snapshot) async {
+    await txn.delete('contacts');
+    for (final contact in snapshot.contacts) {
+      await _writeContact(txn, contact);
+      await _writeMessages(
+        txn,
+        contact.id,
+        snapshot.messagesByContact[contact.id] ?? const <Message>[],
+      );
+      await _syncActiveBranchSnapshot(txn, contact);
     }
   }
 
@@ -372,6 +391,10 @@ CREATE TABLE IF NOT EXISTS conversation_checkpoints (
   }) async {
     try {
       await _db.transaction((txn) async {
+        final exists = await txn.query('contacts',
+            columns: ['id'], where: 'id = ?', whereArgs: [contact.id]);
+        final before =
+            exists.isEmpty ? null : await _journal.projection(txn, contact.id);
         await _writeContact(txn, contact);
         await _writeMessages(txn, contact.id, messages);
         await _syncActiveBranchSnapshot(txn, contact);
@@ -385,6 +408,7 @@ CREATE TABLE IF NOT EXISTS conversation_checkpoints (
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
         }
+        if (before != null) await _journal.record(txn, contact.id, before);
       });
     } catch (error) {
       throw ChatStorageException('saveConversation', error);
@@ -407,6 +431,10 @@ CREATE TABLE IF NOT EXISTS conversation_checkpoints (
     }
     try {
       await _db.transaction((txn) async {
+        final exists = await txn.query('contacts',
+            columns: ['id'], where: 'id = ?', whereArgs: [contact.id]);
+        final before =
+            exists.isEmpty ? null : await _journal.projection(txn, contact.id);
         await _writeContact(txn, contact);
         await txn.delete(
           'messages',
@@ -430,6 +458,7 @@ CREATE TABLE IF NOT EXISTS conversation_checkpoints (
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
         }
+        if (before != null) await _journal.record(txn, contact.id, before);
       });
     } catch (error) {
       if (error is ArgumentError) rethrow;
@@ -562,6 +591,7 @@ CREATE TABLE IF NOT EXISTS conversation_checkpoints (
       createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
       messageCount: row['message_count'] as int,
       isKey: row['is_key'] == 1,
+      storyRevision: row['story_revision'] as int?,
     );
   }
 
@@ -641,6 +671,7 @@ CREATE TABLE IF NOT EXISTS conversation_checkpoints (
           'message_count': branch['message_count'],
           'created_at': now,
           'is_key': isKey ? 1 : 0,
+          'story_revision': (await _journal.head(txn, branchId))['revision'],
         };
         await txn.insert('conversation_checkpoints', values);
         checkpoint = _checkpointFromRow(values);
@@ -686,7 +717,8 @@ LIMIT -1 OFFSET 200
         if (checkpointRows.isEmpty) {
           throw StateError('Checkpoint not found: $checkpointId');
         }
-        final checkpoint = checkpointRows.single;
+        final checkpoint =
+            await _journal.materialize(txn, checkpointRows.single);
         final now = DateTime.now().millisecondsSinceEpoch;
         final id = 'branch-${DateTime.now().microsecondsSinceEpoch}';
         final values = <String, Object?>{
@@ -704,6 +736,7 @@ LIMIT -1 OFFSET 200
           'is_main': 0,
         };
         await txn.insert('conversation_branches', values);
+        await _journal.fork(txn, checkpoint, id);
         branch = _branchFromRow(values);
       });
       return branch;
@@ -722,6 +755,7 @@ LIMIT -1 OFFSET 200
       late ConversationBranchSnapshot snapshot;
       await _db.transaction((txn) async {
         final currentContact = await _readContact(txn, contactId);
+        await _journal.requireIdle(txn, await _journal.active(txn, contactId));
         await _syncActiveBranchSnapshot(txn, currentContact);
         final rows = await txn.query(
           'conversation_branches',
@@ -734,6 +768,7 @@ LIMIT -1 OFFSET 200
         final contact = Contact.fromJson(_decodeMap(row['contact_payload']));
         final messages = _messagesFromPayload(row['messages_payload']);
         await _writeContact(txn, contact);
+        await _journal.activateMetadata(txn, branchId);
         await _writeMessages(txn, contactId, messages);
         await txn.update(
           'conversation_branches',
@@ -839,11 +874,16 @@ LIMIT -1 OFFSET 200
         'conversation_branches',
         orderBy: 'contact_id ASC, created_at ASC',
       );
-      final checkpointRows = await _db.query(
+      final rawCheckpointRows = await _db.query(
         'conversation_checkpoints',
         orderBy: 'contact_id ASC, created_at ASC',
       );
+      final checkpointRows = <Map<String, Object?>>[];
+      for (final row in rawCheckpointRows) {
+        checkpointRows.add(await _journal.materialize(_db, row));
+      }
       return ConversationTimelineArchive(
+        journal: await _journal.export(_db),
         branches: <ConversationBranchSnapshot>[
           for (final row in branchRows)
             ConversationBranchSnapshot(
@@ -868,53 +908,127 @@ LIMIT -1 OFFSET 200
 
   @override
   Future<void> replaceTimelineArchive(
-    ConversationTimelineArchive archive,
-  ) async {
+      ConversationTimelineArchive archive) async {
     try {
-      await _db.transaction((txn) async {
-        await txn.delete('conversation_checkpoints');
-        await txn.delete('conversation_branches');
-        for (final snapshot in archive.branches) {
-          final branch = snapshot.branch;
-          await txn.insert('conversation_branches', <String, Object?>{
-            'id': branch.id,
-            'contact_id': branch.contactId,
-            'name': branch.name,
-            'parent_branch_id': branch.parentBranchId,
-            'fork_checkpoint_id': branch.forkCheckpointId,
-            'contact_payload': jsonEncode(snapshot.contact.toJson()),
-            'messages_payload': jsonEncode(
-              snapshot.messages.map((message) => message.toJson()).toList(),
-            ),
-            'message_count': snapshot.messages.length,
-            'created_at': branch.createdAt.millisecondsSinceEpoch,
-            'updated_at': branch.updatedAt.millisecondsSinceEpoch,
-            'is_active': branch.isActive ? 1 : 0,
-            'is_main': branch.isMain ? 1 : 0,
-          });
-        }
-        for (final snapshot in archive.checkpoints) {
-          final checkpoint = snapshot.checkpoint;
-          await txn.insert('conversation_checkpoints', <String, Object?>{
-            'id': checkpoint.id,
-            'contact_id': checkpoint.contactId,
-            'branch_id': checkpoint.branchId,
-            'source_message_id': checkpoint.sourceMessageId,
-            'label': checkpoint.label,
-            'contact_payload': jsonEncode(snapshot.contact.toJson()),
-            'messages_payload': jsonEncode(
-              snapshot.messages.map((message) => message.toJson()).toList(),
-            ),
-            'message_count': snapshot.messages.length,
-            'created_at': checkpoint.createdAt.millisecondsSinceEpoch,
-            'is_key': checkpoint.isKey ? 1 : 0,
-          });
-        }
-      });
+      await _db.transaction((txn) => _replaceTimelineArchiveTx(txn, archive));
     } catch (error) {
       throw ChatStorageException('replaceTimelineArchive', error);
     }
   }
+
+  Future<void> _replaceTimelineArchiveTx(
+      DatabaseExecutor txn, ConversationTimelineArchive archive) async {
+    await txn.delete('conversation_checkpoints');
+    await txn.delete('conversation_branches');
+    for (final snapshot in archive.branches) {
+      final branch = snapshot.branch;
+      await txn.insert('conversation_branches', <String, Object?>{
+        'id': branch.id,
+        'contact_id': branch.contactId,
+        'name': branch.name,
+        'parent_branch_id': branch.parentBranchId,
+        'fork_checkpoint_id': branch.forkCheckpointId,
+        'contact_payload': jsonEncode(snapshot.contact.toJson()),
+        'messages_payload': jsonEncode(
+          snapshot.messages.map((message) => message.toJson()).toList(),
+        ),
+        'message_count': snapshot.messages.length,
+        'created_at': branch.createdAt.millisecondsSinceEpoch,
+        'updated_at': branch.updatedAt.millisecondsSinceEpoch,
+        'is_active': branch.isActive ? 1 : 0,
+        'is_main': branch.isMain ? 1 : 0,
+      });
+    }
+    for (final snapshot in archive.checkpoints) {
+      final checkpoint = snapshot.checkpoint;
+      await txn.insert('conversation_checkpoints', <String, Object?>{
+        'id': checkpoint.id,
+        'contact_id': checkpoint.contactId,
+        'branch_id': checkpoint.branchId,
+        'source_message_id': checkpoint.sourceMessageId,
+        'label': checkpoint.label,
+        'contact_payload': jsonEncode(snapshot.contact.toJson()),
+        'messages_payload': jsonEncode(
+          snapshot.messages.map((message) => message.toJson()).toList(),
+        ),
+        'message_count': snapshot.messages.length,
+        'created_at': checkpoint.createdAt.millisecondsSinceEpoch,
+        'is_key': checkpoint.isKey ? 1 : 0,
+        'story_revision': checkpoint.storyRevision,
+      });
+    }
+    await _journal.restore(txn, archive.journal);
+    for (final snapshot in archive.checkpoints) {
+      final cp = snapshot.checkpoint;
+      if (cp.storyRevision == null) continue;
+      final heads = await txn.query('story_heads',
+          where: 'branch_id = ?', whereArgs: [cp.branchId]);
+      if (heads.isEmpty) throw const FormatException('检查点缺少恢复日志');
+      final projection =
+          await _journal.atRevision(txn, cp.branchId, cp.storyRevision!);
+      final branch = (await txn.query('conversation_branches',
+              where: 'id = ?', whereArgs: [cp.branchId]))
+          .single;
+      if (!_StoryJournal.delta
+              .same(projection['contact'], snapshot.contact.toJson()) ||
+          !_StoryJournal.delta.same(
+              snapshot.messages.map((m) => m.toJson()).toList(),
+              _messagesFromPayload(branch['messages_payload'])
+                  .take(snapshot.messages.length)
+                  .map((m) => m.toJson())
+                  .toList())) {
+        throw const FormatException('检查点与恢复日志不匹配');
+      }
+      await txn.update('conversation_checkpoints',
+          {'contact_payload': '', 'messages_payload': '[]'},
+          where: 'id = ?', whereArgs: [cp.id]);
+    }
+  }
+
+  @override
+  Future<void> restoreStoryBackup(
+          ChatSnapshot snapshot, ConversationTimelineArchive archive) =>
+      _db.transaction((txn) async {
+        if (archive.branches.isEmpty && archive.journal.isNotEmpty) {
+          throw const FormatException('轮次日志缺少分支');
+        }
+        final old = await txn.query('contacts', columns: ['id']);
+        for (final id in {
+          ...old.map((r) => r['id'] as String),
+          ...snapshot.contacts.map((c) => c.id)
+        }) {
+          await _journal.writeMetadata(
+              txn, {for (final key in _journal.keys(id)) key: null});
+        }
+        await _replaceSnapshotTx(txn, snapshot);
+        if (archive.branches.isNotEmpty) {
+          await _replaceTimelineArchiveTx(txn, archive);
+        }
+      });
+
+  @override
+  Future<StoryTurnHandle> beginStoryTurn(
+          {required String contactId, required Message userMessage}) =>
+      _journal.begin(contactId, userMessage);
+  @override
+  Future<void> commitStoryTurn(
+          {required StoryTurnHandle turn,
+          required Contact contact,
+          required List<Message> messages}) =>
+      _journal.commit(turn, contact, messages);
+  @override
+  Future<void> abortStoryTurn(
+          {required StoryTurnHandle turn, required List<Message> messages}) =>
+      _journal.abort(turn, messages);
+  @override
+  Future<StoryTruncation?> previewStoryTruncation(
+          {required String contactId, String? messageId}) =>
+      _journal.preview(contactId, messageId);
+  @override
+  Future<void> truncateStory(StoryTruncation target) =>
+      _journal.truncate(target);
+  @override
+  Future<void> recoverStoryAttempts() => _journal.recover();
 
   @override
   Future<void> deleteConversation(String contactId) async {

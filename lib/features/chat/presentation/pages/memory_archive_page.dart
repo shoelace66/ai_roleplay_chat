@@ -1,3 +1,5 @@
+import '../../data/models/continuity_state.dart';
+import '../widgets/story_state_editor.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -68,12 +70,10 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
           .toList(growable: false);
     }
     if (_statusFilter.contains('invalidated')) {
-      result =
-          result.where((node) => node.invalidated).toList(growable: false);
+      result = result.where((node) => node.invalidated).toList(growable: false);
     }
     if (_statusFilter.contains('needsReview')) {
-      result =
-          result.where((node) => node.needsReview).toList(growable: false);
+      result = result.where((node) => node.needsReview).toList(growable: false);
     }
     if (_statusFilter.contains('locked')) {
       result = result
@@ -82,8 +82,8 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
     }
     if (_statusFilter.contains('normal')) {
       result = result
-          .where(
-              (node) => !node.invalidated && !widget.provider.isMemoryLocked(node.id))
+          .where((node) =>
+              !node.invalidated && !widget.provider.isMemoryLocked(node.id))
           .toList(growable: false);
     }
     return result;
@@ -100,8 +100,12 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
             title: const Text('记忆档案'),
             actions: [
               IconButton(
-                onPressed:
-                    widget.provider.canUndoMemoryRevision ? _undo : null,
+                onPressed: _showCurrentState,
+                tooltip: '当前状态',
+                icon: const Icon(Icons.fact_check_outlined),
+              ),
+              IconButton(
+                onPressed: widget.provider.canUndoMemoryRevision ? _undo : null,
                 tooltip: '撤销最近一次记忆修改',
                 icon: const Icon(Icons.undo),
               ),
@@ -136,6 +140,37 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
         );
       },
     );
+  }
+
+  Future<void> _showCurrentState() async {
+    final contact = widget.provider.selectedContact;
+    if (contact == null) return;
+    final branchId = widget.provider.activeConversationBranch?.id;
+    ContinuityState draft = contact.continuity;
+    final save = await showDialog<bool>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+            builder: (context, setState) => AlertDialog(
+                  title: const Text('故事状态'),
+                  content: SizedBox(
+                      width: 520,
+                      child: SingleChildScrollView(
+                          child: StoryStateEditor(
+                              value: draft,
+                              onChanged: (value) =>
+                                  setState(() => draft = value)))),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('取消')),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('保存'))
+                  ],
+                )));
+    if (save == true && widget.provider.selectedContact?.id == contact.id) {
+      await widget.provider.updateStoryState(draft, expectedBranchId: branchId);
+    }
   }
 
   Widget _buildStatsBar(BuildContext context, List<EventNode> nodes) {
@@ -348,8 +383,7 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            decoration:
-                node.invalidated ? TextDecoration.lineThrough : null,
+            decoration: node.invalidated ? TextDecoration.lineThrough : null,
           ),
         ),
         subtitle: Text([
@@ -434,8 +468,7 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
               Row(
                 children: [
                   Icon(Icons.chat_bubble_outline,
-                      size: 14,
-                      color: Theme.of(context).colorScheme.primary),
+                      size: 14, color: Theme.of(context).colorScheme.primary),
                   const SizedBox(width: 4),
                   Text(
                     '来源对话',
@@ -452,9 +485,7 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
               ),
               const SizedBox(height: 4),
               Text(
-                lines.length > 3
-                    ? '${lines.take(3).join("\n")}\n...'
-                    : source,
+                lines.length > 3 ? '${lines.take(3).join("\n")}\n...' : source,
                 maxLines: 4,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -503,7 +534,8 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
     final grouped = <String, List<EventNode>>{};
     for (final node in sorted) {
       final date = DateTime.fromMillisecondsSinceEpoch(node.createdAtMs);
-      final key = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+      final key =
+          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
       grouped.putIfAbsent(key, () => []).add(node);
     }
     return ListView(
@@ -528,9 +560,7 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onPrimaryContainer,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
                       ),
                     ),
                   ),
@@ -563,9 +593,7 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
                           Container(
                             width: 2,
                             height: 30,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .outlineVariant,
+                            color: Theme.of(context).colorScheme.outlineVariant,
                           ),
                         ],
                       ),
@@ -670,8 +698,7 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
     for (final edge in edges.values) {
       nodeEdgeCount[edge.fromNodeId] =
           (nodeEdgeCount[edge.fromNodeId] ?? 0) + 1;
-      nodeEdgeCount[edge.toNodeId] =
-          (nodeEdgeCount[edge.toNodeId] ?? 0) + 1;
+      nodeEdgeCount[edge.toNodeId] = (nodeEdgeCount[edge.toNodeId] ?? 0) + 1;
     }
 
     return ListView(
@@ -708,9 +735,8 @@ class _MemoryArchivePageState extends State<MemoryArchivePage>
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 13,
-                  decoration: node.invalidated
-                      ? TextDecoration.lineThrough
-                      : null,
+                  decoration:
+                      node.invalidated ? TextDecoration.lineThrough : null,
                 ),
               ),
               subtitle: Text(

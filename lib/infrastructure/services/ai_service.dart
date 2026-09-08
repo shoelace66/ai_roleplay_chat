@@ -53,6 +53,17 @@ class RecallRequestBudget {
   }
 }
 
+/// One provider-native conversation turn sent between the stable system
+/// contract and the current user request.
+class AiChatMessage {
+  const AiChatMessage({required this.role, required this.content});
+
+  final String role;
+  final String content;
+
+  bool get isSupportedRole => role == 'user' || role == 'assistant';
+}
+
 class AiService {
   AiService({http.Client? client}) : _client = client ?? http.Client();
 
@@ -68,6 +79,8 @@ class AiService {
     required String contactId,
     required String contactName,
     String? systemPrompt,
+    List<AiChatMessage> history = const <AiChatMessage>[],
+    bool requireJsonObject = false,
     LlmProfile? profile,
     RecallRequestBudget? requestBudget,
   }) async {
@@ -81,6 +94,8 @@ class AiService {
       return await _requestWithFallback(
         prompt: prompt,
         systemPrompt: systemPrompt,
+        history: history,
+        requireJsonObject: requireJsonObject,
         profile: effectiveProfile,
         client: _client,
         requestBudget: requestBudget,
@@ -105,6 +120,8 @@ class AiService {
     required String contactId,
     required String contactName,
     String? systemPrompt,
+    List<AiChatMessage> history = const <AiChatMessage>[],
+    bool requireJsonObject = false,
     LlmProfile? profile,
   }) async* {
     final effectiveProfile = profile ?? _runtimeProfile();
@@ -115,6 +132,8 @@ class AiService {
       yield* _requestStreamWithFallback(
         prompt: prompt,
         systemPrompt: systemPrompt,
+        history: history,
+        requireJsonObject: requireJsonObject,
         profile: effectiveProfile,
         client: _client,
       );
@@ -142,6 +161,8 @@ class AiService {
   Future<String> _requestWithFallback({
     required String prompt,
     String? systemPrompt,
+    required List<AiChatMessage> history,
+    required bool requireJsonObject,
     required LlmProfile profile,
     required http.Client client,
     RecallRequestBudget? requestBudget,
@@ -159,6 +180,8 @@ class AiService {
         final result = await _requestOnce(
           prompt: prompt,
           systemPrompt: systemPrompt,
+          history: history,
+          requireJsonObject: requireJsonObject,
           url: url,
           profile: profile,
           client: client,
@@ -183,6 +206,8 @@ class AiService {
   Stream<String> _requestStreamWithFallback({
     required String prompt,
     String? systemPrompt,
+    required List<AiChatMessage> history,
+    required bool requireJsonObject,
     required LlmProfile profile,
     required http.Client client,
   }) async* {
@@ -197,6 +222,8 @@ class AiService {
         await for (final chunk in _requestStreamOnce(
           prompt: prompt,
           systemPrompt: systemPrompt,
+          history: history,
+          requireJsonObject: requireJsonObject,
           url: url,
           profile: profile,
           client: client,
@@ -220,6 +247,8 @@ class AiService {
   Stream<String> _requestStreamOnce({
     required String prompt,
     String? systemPrompt,
+    required List<AiChatMessage> history,
+    required bool requireJsonObject,
     required String url,
     required LlmProfile profile,
     required http.Client client,
@@ -227,13 +256,22 @@ class AiService {
     final params = profile.parameters;
     final payload = <String, dynamic>{
       'model': profile.model,
-      'messages': _buildMessages(prompt, systemPrompt: systemPrompt),
+      'messages': _buildMessages(
+        prompt,
+        systemPrompt: systemPrompt,
+        history: history,
+      ),
       'temperature': params.temperature,
       'top_p': params.topP,
       'frequency_penalty': params.frequencyPenalty,
       'presence_penalty': params.presencePenalty,
       'stream': true,
     };
+    if (requireJsonObject && params.useJsonResponseFormat) {
+      payload['response_format'] = const <String, String>{
+        'type': 'json_object',
+      };
+    }
     if (params.maxTokens > 0) payload['max_tokens'] = params.maxTokens;
     final request = http.Request('POST', Uri.parse(url))
       ..headers.addAll(<String, String>{
@@ -313,6 +351,8 @@ class AiService {
   Future<String> _requestOnce({
     required String prompt,
     String? systemPrompt,
+    required List<AiChatMessage> history,
+    required bool requireJsonObject,
     required String url,
     required LlmProfile profile,
     required http.Client client,
@@ -322,13 +362,22 @@ class AiService {
     final params = profile.parameters;
     final payload = <String, dynamic>{
       'model': profile.model,
-      'messages': _buildMessages(prompt, systemPrompt: systemPrompt),
+      'messages': _buildMessages(
+        prompt,
+        systemPrompt: systemPrompt,
+        history: history,
+      ),
       'temperature': params.temperature,
       'top_p': params.topP,
       'frequency_penalty': params.frequencyPenalty,
       'presence_penalty': params.presencePenalty,
       'stream': params.stream,
     };
+    if (requireJsonObject && params.useJsonResponseFormat) {
+      payload['response_format'] = const <String, String>{
+        'type': 'json_object',
+      };
+    }
     if (params.maxTokens > 0) {
       payload['max_tokens'] = params.maxTokens;
     }
@@ -369,11 +418,18 @@ class AiService {
   List<Map<String, String>> _buildMessages(
     String prompt, {
     String? systemPrompt,
+    List<AiChatMessage> history = const <AiChatMessage>[],
   }) {
     final stablePrefix = systemPrompt?.trim() ?? '';
     return <Map<String, String>>[
       if (stablePrefix.isNotEmpty)
         <String, String>{'role': 'system', 'content': stablePrefix},
+      for (final message in history)
+        if (message.isSupportedRole && message.content.trim().isNotEmpty)
+          <String, String>{
+            'role': message.role,
+            'content': message.content,
+          },
       <String, String>{'role': 'user', 'content': prompt},
     ];
   }

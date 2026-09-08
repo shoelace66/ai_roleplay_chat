@@ -48,6 +48,7 @@ void main() {
       );
 
       expect(decision.sourceTier, EventTier.shortTerm);
+      expect(decision.sourceNodeIds, ['s1', 's2']);
       expect(
         decision.pendingEvents.map((event) => event.description),
         <String>['s1', 's2'],

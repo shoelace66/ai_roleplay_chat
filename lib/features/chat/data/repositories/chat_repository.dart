@@ -1,3 +1,4 @@
+import '../../../../core/utils/roleplay_protocol.dart';
 import '../../../../core/data/models/app_settings.dart';
 import '../../../../core/data/models/provider_settings.dart';
 import '../../../../core/utils/structured_input_prompt_composer.dart';
@@ -9,43 +10,19 @@ class ChatRepository {
 
   AiService get aiService => _aiService;
 
-  static const String outputSchema = '''
-{
-  "protocolVersion": "roleplay-memory-v2",
-  "memoryPatch": {
-    "summary": {"description": "往期事件的综合总结，300字以内", "keywords": ["总结关键词1"]},
-    "eventBrief": {"description": "在回复前确定的本轮规范事件，300字以内", "keywords": ["实体关键词1"], "theme": ["主题/氛围1"]},
-    "relatedEventIds": [0, 3],
-    "worldKnowledge": ["重要的新世界/背景知识，可省略"],
-    "selfKnowledge": ["重要的新自我认知，可省略"],
-    "userKnowledge": ["重要的新用户认知，可省略"],
-    "belongings": ["(新增)物品名", "(提及)物品名"],
-    "currentStates": {"用户创建的状态key": "新的状态value"}
-  },
-  "reply": "根据前述本轮事件和状态展开的回复"
-}
-''';
+  static const String outputSchema = RoleplayProtocol.outputSchema;
 
   final AiService _aiService;
-  final Map<String, List<Message>> _cacheByContact = <String, List<Message>>{};
-
-  List<Message> getCachedMessages(String contactId) {
-    final list = _cacheByContact[contactId] ?? const <Message>[];
-    return List<Message>.unmodifiable(list);
-  }
-
   Future<Message> askAi({
     required String contactId,
     required String contactName,
     required Message userMessage,
     String? systemPrompt,
     String? dynamicContext,
+    List<Message> conversationHistory = const <Message>[],
     AppSettings? settings,
     LlmProfile? profile,
   }) async {
-    final list = _cacheByContact.putIfAbsent(contactId, () => <Message>[]);
-    list.add(userMessage);
-
     final composer = StructuredInputPromptComposer(
       settings: settings ?? const AppSettings(),
     );
@@ -53,7 +30,7 @@ class ChatRepository {
       userInput: userMessage.content,
       systemPrompt: systemPrompt,
       dynamicContext: dynamicContext,
-      outputSchema: outputSchema,
+      outputSchema: systemPrompt?.trim().isNotEmpty == true ? '' : outputSchema,
     );
 
     final assistantReply = await _aiService.ask(
@@ -61,6 +38,8 @@ class ChatRepository {
       contactId: contactId,
       contactName: contactName,
       systemPrompt: promptParts.systemPrompt,
+      history: _toAiHistory(conversationHistory),
+      requireJsonObject: true,
       profile: profile,
     );
 
@@ -70,7 +49,6 @@ class ChatRepository {
       content: assistantReply,
       createdAt: DateTime.now(),
     );
-    list.add(assistantMessage);
     return assistantMessage;
   }
 
@@ -80,11 +58,10 @@ class ChatRepository {
     required Message userMessage,
     String? systemPrompt,
     String? dynamicContext,
+    List<Message> conversationHistory = const <Message>[],
     AppSettings? settings,
     LlmProfile? profile,
   }) {
-    final list = _cacheByContact.putIfAbsent(contactId, () => <Message>[]);
-    list.add(userMessage);
     final composer = StructuredInputPromptComposer(
       settings: settings ?? const AppSettings(),
     );
@@ -92,13 +69,15 @@ class ChatRepository {
       userInput: userMessage.content,
       systemPrompt: systemPrompt,
       dynamicContext: dynamicContext,
-      outputSchema: outputSchema,
+      outputSchema: systemPrompt?.trim().isNotEmpty == true ? '' : outputSchema,
     );
     return _aiService.askStream(
       promptParts.userPrompt,
       contactId: contactId,
       contactName: contactName,
       systemPrompt: promptParts.systemPrompt,
+      history: _toAiHistory(conversationHistory),
+      requireJsonObject: true,
       profile: profile,
     );
   }
@@ -118,4 +97,17 @@ class ChatRepository {
       requestBudget: requestBudget,
     );
   }
+
+  List<AiChatMessage> _toAiHistory(List<Message> messages) => messages
+      .where((message) =>
+          message.status == MessageStatus.sent &&
+          !message.isImageMessage &&
+          message.content.trim().isNotEmpty)
+      .map(
+        (message) => AiChatMessage(
+          role: message.role.name,
+          content: message.content,
+        ),
+      )
+      .toList(growable: false);
 }

@@ -228,6 +228,7 @@ class LlmParameters {
     this.presencePenalty = 0.0,
     this.timeoutSeconds = 60,
     this.stream = false,
+    this.useJsonResponseFormat = false,
   });
 
   /// 0.0 - 2.0
@@ -250,6 +251,10 @@ class LlmParameters {
   /// 完整 JSON 到达后才会提交 memoryPatch。
   final bool stream;
 
+  /// 对要求 JSON 的请求发送 OpenAI 兼容的 `response_format=json_object`。
+  /// 不支持该参数的服务应保持关闭。
+  final bool useJsonResponseFormat;
+
   LlmParameters copyWith({
     double? temperature,
     double? topP,
@@ -258,6 +263,7 @@ class LlmParameters {
     double? presencePenalty,
     int? timeoutSeconds,
     bool? stream,
+    bool? useJsonResponseFormat,
   }) {
     return LlmParameters(
       temperature: temperature ?? this.temperature,
@@ -267,6 +273,8 @@ class LlmParameters {
       presencePenalty: presencePenalty ?? this.presencePenalty,
       timeoutSeconds: timeoutSeconds ?? this.timeoutSeconds,
       stream: stream ?? this.stream,
+      useJsonResponseFormat:
+          useJsonResponseFormat ?? this.useJsonResponseFormat,
     );
   }
 
@@ -278,6 +286,7 @@ class LlmParameters {
         'presencePenalty': presencePenalty,
         'timeoutSeconds': timeoutSeconds,
         'stream': stream,
+        'useJsonResponseFormat': useJsonResponseFormat,
       };
 
   factory LlmParameters.fromJson(Map<String, dynamic> json) {
@@ -289,6 +298,7 @@ class LlmParameters {
       presencePenalty: (json['presencePenalty'] as num?)?.toDouble() ?? 0.0,
       timeoutSeconds: (json['timeoutSeconds'] as num?)?.toInt() ?? 60,
       stream: json['stream'] == true,
+      useJsonResponseFormat: json['useJsonResponseFormat'] == true,
     );
   }
 }

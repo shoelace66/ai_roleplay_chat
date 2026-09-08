@@ -149,6 +149,76 @@ void main() {
       expect(messages[1]['content'], endsWith('继续推门'));
     });
 
+    test('角色请求保留原生历史角色，并按 Profile 选择 JSON 响应模式', () async {
+      late http.Request captured;
+      final mock = MockClient((request) async {
+        captured = request;
+        return _utf8Response(jsonEncode(<String, dynamic>{
+          'choices': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'message': <String, dynamic>{'content': '{"reply":"ok"}'},
+            },
+          ],
+        }));
+      });
+
+      await AiService(client: mock).ask(
+        '当前上下文与输入',
+        systemPrompt: '稳定 Agent 契约',
+        history: const <AiChatMessage>[
+          AiChatMessage(role: 'user', content: '上一轮问题'),
+          AiChatMessage(role: 'assistant', content: '上一轮回答'),
+        ],
+        requireJsonObject: true,
+        contactId: 'c1',
+        contactName: 'Test',
+        profile: const LlmProfile(
+          apiKey: 'sk',
+          baseUrl: 'https://example.com/v1',
+          model: 'm',
+          parameters: LlmParameters(useJsonResponseFormat: true),
+        ),
+      );
+
+      final body = jsonDecode(captured.body) as Map<String, dynamic>;
+      expect(body['response_format'], {'type': 'json_object'});
+      expect(body['messages'], [
+        {'role': 'system', 'content': '稳定 Agent 契约'},
+        {'role': 'user', 'content': '上一轮问题'},
+        {'role': 'assistant', 'content': '上一轮回答'},
+        {'role': 'user', 'content': '当前上下文与输入'},
+      ]);
+    });
+
+    test('未开启 Profile JSON 模式时不发送 response_format', () async {
+      late http.Request captured;
+      final mock = MockClient((request) async {
+        captured = request;
+        return _utf8Response(jsonEncode(<String, dynamic>{
+          'choices': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'message': <String, dynamic>{'content': '{"reply":"ok"}'},
+            },
+          ],
+        }));
+      });
+
+      await AiService(client: mock).ask(
+        'hi',
+        requireJsonObject: true,
+        contactId: 'c1',
+        contactName: 'Test',
+        profile: const LlmProfile(
+          apiKey: 'sk',
+          baseUrl: 'https://example.com/v1',
+          model: 'm',
+        ),
+      );
+
+      final body = jsonDecode(captured.body) as Map<String, dynamic>;
+      expect(body.containsKey('response_format'), isFalse);
+    });
+
     test('max_tokens=0 时不写入字段', () async {
       late http.Request captured;
       final mock = MockClient((request) async {

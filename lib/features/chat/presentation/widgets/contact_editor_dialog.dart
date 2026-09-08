@@ -1,3 +1,7 @@
+import '../../data/models/continuity_state.dart';
+import 'story_state_editor.dart';
+import 'contact_avatar.dart';
+import '../../../../core/utils/avatar_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../infrastructure/services/tts_service.dart';
@@ -11,10 +15,12 @@ class ContactDraft {
     required this.currentStates,
     required this.category,
     this.voice = '',
+    this.continuity = const ContinuityState.empty(),
     this.jsonString,
     this.naturalLanguage,
   });
 
+  final ContinuityState continuity;
   final String name;
   final String avatar;
   final String fixedInput;
@@ -39,45 +45,64 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
   final TextEditingController _nameCtrl = TextEditingController();
   final TextEditingController _avatarCtrl = TextEditingController();
   final TextEditingController _fixedInputCtrl = TextEditingController();
-  final TextEditingController _stateKeyCtrl = TextEditingController();
+  final TextEditingController _fullContextCtrl = TextEditingController();
   final TextEditingController _jsonCtrl = TextEditingController();
   final TextEditingController _nlCtrl = TextEditingController();
 
-  final Map<String, String> _currentStates = <String, String>{};
+  ContinuityState _state = const ContinuityState.empty();
+  Map<String, String> get _currentStates => _state.byName;
   ContactCategory _category = ContactCategory.contact;
   String _voiceId = VoiceOption.fallback.id;
   _EditorMode _mode = _EditorMode.normal;
+  String? _photoAvatar;
+  bool _pickingAvatar = false;
+  String get _avatar => _photoAvatar ?? _avatarCtrl.text.trim();
+
+  Future<void> _chooseAvatar() async {
+    setState(() => _pickingAvatar = true);
+    try {
+      final value = await AvatarImage.pick();
+      if (value != null && mounted) setState(() => _photoAvatar = value);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content:
+              Text(error is FormatException ? error.message : '照片选择失败，请重试'),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _pickingAvatar = false);
+    }
+  }
 
   @override
   void dispose() {
     _nameCtrl.dispose();
     _avatarCtrl.dispose();
     _fixedInputCtrl.dispose();
-    _stateKeyCtrl.dispose();
+    _fullContextCtrl.dispose();
     _jsonCtrl.dispose();
     _nlCtrl.dispose();
     super.dispose();
   }
 
-  void _addStateKey() {
-    final key = _stateKeyCtrl.text.trim();
-    if (key.isEmpty) return;
-    setState(() {
-      _currentStates.putIfAbsent(key, () => '');
-      _stateKeyCtrl.clear();
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
+    final dialogWidth =
+        (MediaQuery.of(context).size.width - 32).clamp(520.0, 920.0);
+    final dialogHeight =
+        (MediaQuery.of(context).size.height - 48).clamp(460.0, 860.0);
     return AlertDialog(
       title: Text(_category == ContactCategory.story
           ? '创建故事'
           : _category == ContactCategory.assistant
               ? '创建助手'
               : '创建角色'),
-      content: SizedBox(
-        width: 520,
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: dialogWidth,
+          maxHeight: dialogHeight,
+        ),
         child: _buildContent(),
       ),
       actions: [
@@ -86,7 +111,7 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
           child: const Text('取消'),
         ),
         FilledButton(
-          onPressed: _onSave,
+          onPressed: _pickingAvatar ? null : _onSave,
           child: const Text('创建'),
         ),
       ],
@@ -105,33 +130,32 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
   }
 
   Widget _buildTypeSelector() {
-    return RadioGroup<ContactCategory>(
-      groupValue: _category,
-      onChanged: (value) {
-        if (value != null) setState(() => _category = value);
-      },
-      child: const Row(
-        children: [
-          Expanded(
-            child: RadioListTile<ContactCategory>(
-              title: Text('角色'),
-              value: ContactCategory.contact,
-            ),
-          ),
-          Expanded(
-            child: RadioListTile<ContactCategory>(
-              title: Text('故事'),
-              value: ContactCategory.story,
-            ),
-          ),
-          Expanded(
-            child: RadioListTile<ContactCategory>(
-              title: Text('助手'),
-              value: ContactCategory.assistant,
-            ),
-          ),
-        ],
-      ),
+    return Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      children: [
+        ChoiceChip(
+          label: const Text('角色'),
+          selected: _category == ContactCategory.contact,
+          onSelected: (selected) {
+            if (selected) setState(() => _category = ContactCategory.contact);
+          },
+        ),
+        ChoiceChip(
+          label: const Text('故事'),
+          selected: _category == ContactCategory.story,
+          onSelected: (selected) {
+            if (selected) setState(() => _category = ContactCategory.story);
+          },
+        ),
+        ChoiceChip(
+          label: const Text('助手'),
+          selected: _category == ContactCategory.assistant,
+          onSelected: (selected) {
+            if (selected) setState(() => _category = ContactCategory.assistant);
+          },
+        ),
+      ],
     );
   }
 
@@ -150,17 +174,66 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
           ),
         ),
         const SizedBox(height: 12),
-        TextField(
-          controller: _avatarCtrl,
-          decoration: const InputDecoration(
-            labelText: '头像',
-            hintText: '一个 emoji 或简短符号',
+        if (_photoAvatar == null)
+          TextField(
+            controller: _avatarCtrl,
+            decoration: const InputDecoration(
+                labelText: '头像', hintText: '一个 emoji 或简短符号'),
           ),
-        ),
+        const SizedBox(height: 8),
+        Row(children: [
+          if (_photoAvatar != null)
+            ContactAvatar(avatar: _photoAvatar!, name: _nameCtrl.text),
+          Expanded(
+              child: TextButton.icon(
+            onPressed: _pickingAvatar ? null : _chooseAvatar,
+            icon: const Icon(Icons.photo_library_outlined),
+            label: Text(_pickingAvatar ? '正在读取…' : '选择 JPG / PNG 照片'),
+          )),
+          if (_photoAvatar != null)
+            IconButton(
+                tooltip: '移除照片',
+                onPressed: () => setState(() => _photoAvatar = null),
+                icon: const Icon(Icons.close)),
+        ]),
         const SizedBox(height: 12),
         _buildVoiceSelector(),
       ],
     );
+  }
+
+  Widget _buildTextSection({
+    required String title,
+    required TextEditingController controller,
+    required int minLines,
+    int? maxLines,
+    String? hintText,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          minLines: minLines,
+          maxLines: maxLines,
+          decoration: InputDecoration(
+            border: const OutlineInputBorder(),
+            hintText: hintText,
+            alignLabelWithHint: true,
+          ),
+        ),
+      ],
+    );
+  }
+
+  String get _mergedFixedInput {
+    final fixedInput = _fixedInputCtrl.text.trim();
+    final contextText = _fullContextCtrl.text.trim();
+    if (contextText.isEmpty) return fixedInput;
+    if (fixedInput.isEmpty) return contextText;
+    return '$fixedInput\n\n$contextText';
   }
 
   Widget _buildVoiceSelector() {
@@ -242,53 +315,25 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
         children: [
           _buildSharedFields(),
           const SizedBox(height: 16),
-          TextField(
+          _buildTextSection(
+            title: '固定输入内容',
             controller: _fixedInputCtrl,
-            minLines: 5,
-            maxLines: 10,
-            decoration: const InputDecoration(
-              labelText: '固定输入内容',
-              hintText: '每轮对话固定输入的提示词',
-              border: OutlineInputBorder(),
-            ),
+            minLines: 3,
+            maxLines: 8,
+            hintText: '每轮对话固定输入的提示词',
           ),
           const SizedBox(height: 16),
-          Text('需要记录的状态', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _stateKeyCtrl,
-                  decoration: const InputDecoration(
-                    hintText: '例如：好感度、体力、当前位置',
-                    isDense: true,
-                  ),
-                  onSubmitted: (_) => _addStateKey(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: _addStateKey,
-                child: const Text('添加'),
-              ),
-            ],
+          _buildTextSection(
+            title: '全量输入上下文（正文）',
+            controller: _fullContextCtrl,
+            minLines: 8,
+            maxLines: 16,
+            hintText: '可粘贴完整上下文正文，作为固定输入内容的正文补充',
           ),
-          const SizedBox(height: 8),
-          if (_currentStates.isEmpty)
-            const Text('暂无状态 key', style: TextStyle(color: Colors.grey))
-          else
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final key in _currentStates.keys)
-                  InputChip(
-                    label: Text(key),
-                    onDeleted: () => setState(() => _currentStates.remove(key)),
-                  ),
-              ],
-            ),
+          const SizedBox(height: 16),
+          StoryStateEditor(
+              value: _state,
+              onChanged: (value) => setState(() => _state = value)),
           const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -319,9 +364,11 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
   "personality": ["理性", "克制"],
   "appearance": ["短发", "黑色风衣"],
   "backgroundStory": ["成长经历", "核心信念"],
-  "currentStates": {
-    "好感度": "",
-    "当前位置": ""
+  "continuity": {
+    "schemaVersion": 2,
+    "revision": 0,
+    "definitions": [],
+    "values": {}
   }
 }''';
     }
@@ -338,13 +385,13 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
             style: const TextStyle(fontFamily: 'monospace'),
             decoration: const InputDecoration(
               labelText: 'JSON 格式',
-              hintText: '支持完整 JSON，留空字段可为空数组/字符串',
+              hintText: '粘贴角色或故事 JSON，下一步会检查并显示具体问题',
               border: OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 6),
           const Text(
-            '说明：请保持合法 JSON，可直接保存并生成；支持多行、缩进和长文本。',
+            '支持中英文字段名、常见拼写差异、代码块、注释和尾随逗号；创建前会显示兼容调整及具体错误，原文可继续修改。',
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
           Align(
@@ -408,16 +455,22 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
 
   ContactDraft _draft({String? jsonString, String? naturalLanguage}) {
     // 助手类型如果没有 fixedInput，设置默认值
-    String fixedInput = _fixedInputCtrl.text.trim();
+    final rawFixedInput = naturalLanguage?.trim().isNotEmpty == true
+        ? (_mergedFixedInput.isNotEmpty
+            ? _mergedFixedInput
+            : naturalLanguage!.trim())
+        : _mergedFixedInput;
+    String fixedInput = rawFixedInput;
     if (fixedInput.isEmpty && _category == ContactCategory.assistant) {
       fixedInput = '你是一个AI助手，专注于帮助用户完成任务。';
     }
 
     return ContactDraft(
       name: _nameCtrl.text.trim(),
-      avatar: _avatarCtrl.text.trim(),
+      avatar: _avatar,
       fixedInput: fixedInput,
       currentStates: Map<String, String>.from(_currentStates),
+      continuity: _state,
       category: _category,
       voice: _voiceId,
       jsonString: jsonString,
@@ -457,11 +510,10 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
     Navigator.of(context).pop(
       ContactDraft(
         name: _nameCtrl.text.trim(),
-        avatar: _avatarCtrl.text.trim(),
-        fixedInput: _fixedInputCtrl.text.trim().isEmpty
-            ? nlText
-            : _fixedInputCtrl.text.trim(),
+        avatar: _avatar,
+        fixedInput: _mergedFixedInput.isEmpty ? nlText : _mergedFixedInput,
         currentStates: Map<String, String>.from(_currentStates),
+        continuity: _state,
         category: _category,
         voice: _voiceId,
         naturalLanguage: nlText,

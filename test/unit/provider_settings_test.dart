@@ -12,13 +12,19 @@ void main() {
       expect(p.presencePenalty, 0.0);
       expect(p.timeoutSeconds, 60);
       expect(p.stream, isFalse);
+      expect(p.useJsonResponseFormat, isFalse);
     });
 
     test('copyWith 只覆盖指定字段', () {
       const p = LlmParameters();
-      final n = p.copyWith(temperature: 0.2, stream: true);
+      final n = p.copyWith(
+        temperature: 0.2,
+        stream: true,
+        useJsonResponseFormat: true,
+      );
       expect(n.temperature, 0.2);
       expect(n.stream, isTrue);
+      expect(n.useJsonResponseFormat, isTrue);
       expect(n.topP, 1.0);
     });
 
@@ -31,6 +37,7 @@ void main() {
         presencePenalty: -0.2,
         timeoutSeconds: 90,
         stream: true,
+        useJsonResponseFormat: true,
       );
       final restored = LlmParameters.fromJson(p.toJson());
       expect(restored.temperature, 0.5);
@@ -40,12 +47,14 @@ void main() {
       expect(restored.presencePenalty, -0.2);
       expect(restored.timeoutSeconds, 90);
       expect(restored.stream, isTrue);
+      expect(restored.useJsonResponseFormat, isTrue);
     });
 
     test('fromJson 在缺字段时使用默认值', () {
       final restored = LlmParameters.fromJson(const <String, dynamic>{});
       expect(restored.temperature, 0.7);
       expect(restored.stream, isFalse);
+      expect(restored.useJsonResponseFormat, isFalse);
     });
   });
 

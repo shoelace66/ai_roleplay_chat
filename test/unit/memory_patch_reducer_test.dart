@@ -66,11 +66,56 @@ void main() {
       ],
     );
   });
+
+  test('结构化记忆操作可以替换删除旧知识并移除物品', () {
+    final result = reducer.reduce(
+      contact: _contact(
+        worldKnowledge: const <String>['林夏住在北京', '雨城常年多雨'],
+        selfKnowledge: const <String>['我不会游泳'],
+        userKnowledge: const <String>['用户讨厌咖啡'],
+        belongings: const <String>['旧钥匙', '车票'],
+      ),
+      patch: <String, dynamic>{
+        'knowledgeChanges': <Map<String, String>>[
+          {
+            'scope': 'world',
+            'operation': 'replace',
+            'from': '林夏住在北京',
+            'to': '林夏已经搬到上海',
+          },
+          {
+            'scope': 'self',
+            'operation': 'remove',
+            'from': '我不会游泳',
+          },
+          {
+            'scope': 'user',
+            'operation': 'add',
+            'to': '用户喜欢红茶',
+          },
+        ],
+        'belongingChanges': <Map<String, String>>[
+          {'operation': 'remove', 'item': '车票'},
+          {'operation': 'add', 'item': '雨伞'},
+        ],
+      },
+      userInput: '',
+      rawAiResponse: '',
+    );
+
+    expect(result.worldKnowledge, ['林夏已经搬到上海', '雨城常年多雨']);
+    expect(result.selfKnowledge, isEmpty);
+    expect(result.userKnowledge, ['用户讨厌咖啡', '用户喜欢红茶']);
+    expect(result.belongings, ['旧钥匙', '雨伞']);
+    expect(result.belongingChanges.first.type, BelongingChangeType.removed);
+  });
 }
 
 Contact _contact({
   Map<String, String> currentStates = const <String, String>{},
   List<String> worldKnowledge = const <String>[],
+  List<String> selfKnowledge = const <String>[],
+  List<String> userKnowledge = const <String>[],
   List<String> belongings = const <String>[],
 }) {
   return Contact(
@@ -79,6 +124,8 @@ Contact _contact({
     avatar: '',
     currentStates: currentStates,
     worldKnowledge: WorldKnowledgeBucket(worldKnowledge),
+    selfKnowledge: SelfKnowledgeBucket(selfKnowledge),
+    userKnowledge: UserKnowledgeBucket(userKnowledge),
     belongings: belongings,
     createdAt: DateTime(2026),
   );

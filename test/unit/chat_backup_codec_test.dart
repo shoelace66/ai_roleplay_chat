@@ -39,7 +39,7 @@ void main() {
     );
     final restored = codec.decode(encoded);
 
-    expect(encoded, contains('"version":2'));
+    expect(encoded, contains('"version":3'));
     expect(encoded, isNot(contains('apiKey')));
     expect(encoded, isNot(contains('providerSettings')));
     expect(restored.contacts.single.eventGraph.turnCount, 7);

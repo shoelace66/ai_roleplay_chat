@@ -4,6 +4,16 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const parser = ContactImportParser();
 
+  test('显式空配置优先于兼容旧值，旧固定路径与旧状态一起迁移', () {
+    final empty = parser.parse(
+        '{"name":"故事","continuity":{"revision":3,"definitions":[],"values":{}},"currentStates":{"已删除":"不能复活"}}')!;
+    expect(empty.continuity.definitions, isEmpty);
+    expect(empty.currentStates, isEmpty);
+    final legacy = parser.parse(
+        '{"name":"旧故事","continuity":{"revision":2,"values":{"scene/location":"车站"}},"currentStates":{"线索":"脚印"}}')!;
+    expect(legacy.continuity.byName, {'scene/location': '车站', '线索': '脚印'});
+  });
+
   test('拒绝非法 JSON、非对象和缺少名称的数据', () {
     expect(parser.parse('{broken'), isNull);
     expect(parser.parse('[]'), isNull);

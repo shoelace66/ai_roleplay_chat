@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter_chat_demo/features/worldbook/domain/entities/world_book.dart';
 
 import 'package:flutter_chat_demo/core/data/models/provider_settings.dart';
 import 'package:flutter_chat_demo/features/chat/data/models/contact.dart';
@@ -37,6 +40,22 @@ void main() {
   });
 
   tearDown(() => provider.dispose());
+
+  test('JSON 创建失败暴露具体字段，兼容字段创建成功并清除旧错误', () async {
+    expect(await provider.addContactFromJson('{"name":"新角色","personality":{}}'),
+        isFalse);
+    expect(provider.error, contains(r'$.personality'));
+    expect(provider.contacts, hasLength(1));
+    expect(
+        await provider.addContactFromJsonWithFallback(
+            '{"性格":"温柔","current_states":{"好感度":10}}',
+            fallbackName: '新角色'),
+        isTrue);
+    expect(provider.error, isNull);
+    expect(provider.selectedContact!.personality, ['温柔']);
+    expect(provider.selectedContact!.currentStates, {'好感度': '10'});
+    expect(persistence.snapshot.contacts, hasLength(2));
+  });
 
   test('成功发送在最终事务中同时提交消息和正文前事件', () async {
     aiService.mainResponse = '''
@@ -183,7 +202,7 @@ void main() {
     final sending = provider.sendMessage('开始流式回复');
     await Future<void>.delayed(Duration.zero);
     stream.add(
-      '{"memoryPatch":{"eventBrief":{"description":"流式事件"}},"reply":"你',
+      '{"protocolVersion":"roleplay-memory-v5","reply":"你',
     );
     await Future<void>.delayed(const Duration(milliseconds: 40));
 
@@ -191,7 +210,7 @@ void main() {
     expect(provider.messages.last.status, MessageStatus.sending);
     expect(provider.state.generationStatus, ChatGenerationStatus.streaming);
 
-    stream.add('好"}');
+    stream.add('好","memoryPatch":{"eventBrief":{"description":"流式事件"}}}');
     await stream.close();
     await sending;
 
@@ -252,38 +271,190 @@ void main() {
     expect(provider.selectedContact?.eventGraph.turnCount, 1);
   });
 
-  test('消息编辑与删除立即持久化到当前分支', () async {
+  test('已完成剧情不能仅改正文、删除消息或切换候选', () async {
     aiService.mainResponse = '{"memoryPatch":{},"reply":"原回复"}';
     await provider.sendMessage('原问题');
     final assistantId = provider.messages.last.id;
     final userId = provider.messages.first.id;
-
-    expect(await provider.editMessage(assistantId, '修订后的回复'), isTrue);
-    expect(provider.messages.last.content, '修订后的回复');
-    expect(
-      persistence.snapshot.messagesByContact['role-1']?.last.content,
-      '修订后的回复',
-    );
-
-    expect(await provider.deleteMessage(userId), isTrue);
-    expect(provider.messages, hasLength(1));
-    expect(persistence.snapshot.messagesByContact['role-1'], hasLength(1));
+    expect(await provider.editMessage(assistantId, '修订后的回复'), isFalse);
+    expect(await provider.deleteMessage(userId), isFalse);
+    expect(await provider.generateReplyCandidate(assistantId), isFalse);
+    expect(await provider.applyReplyCandidate(assistantId, '候选'), isFalse);
+    expect(provider.messages.last.content, '原回复');
+    expect(provider.messages, hasLength(2));
+    expect(aiService.requestedModels, hasLength(1));
   });
 
-  test('任意消息可保存并切换候选回复', () async {
-    aiService.mainResponse = '{"memoryPatch":{},"reply":"原回复"}';
-    await provider.sendMessage('给出回复');
-    final messageId = provider.messages.last.id;
-    aiService.mainResponse = '另一个候选回复';
+  test('失败消息仍可编辑删除', () async {
+    aiService.failure = const AiServiceException('失败');
+    await provider.sendMessage('失败输入');
+    final id = provider.messages.single.id;
+    expect(await provider.editMessage(id, '新输入'), isTrue);
+    expect(await provider.deleteMessage(id), isTrue);
+    expect(persistence.snapshot.messagesByContact['role-1'], isEmpty);
+  });
 
-    expect(await provider.generateReplyCandidate(messageId), isTrue);
-    expect(provider.messages.last.alternatives, ['另一个候选回复']);
+  test('简短合法回复只调用一次，非法正文不写入状态也不自动重试', () async {
+    aiService.mainResponse = '{"memoryPatch":{},"reply":"嗯。"}';
+    await provider.sendMessage('好吗');
+    expect(provider.messages.last.content, '嗯。');
+    expect(aiService.requestedModels, hasLength(1));
+    aiService.mainResponse = '{"memoryPatch":{"currentStates":{}}';
+    await provider.sendMessage('继续');
+    expect(provider.messages.last.status, MessageStatus.failed);
+    expect(provider.selectedContact!.eventGraph.turnCount, 1);
+    expect(aiService.requestedModels, hasLength(2));
+  });
+
+  test('状态原子提交、跨重启和备份保留、撤回同时恢复衣着与地点', () async {
+    await provider.updateWorldBook(const WorldBook(locations: [
+      WorldLocation(id: 'station', name: '旧车站'),
+    ]));
+    aiService.mainResponse = _stateReply(0, [
+      _change('scene/location', null, '车站'),
+      _change('actor/林夏/outfit', null, '白衬衫、黑裙'),
+    ]);
+    await provider.sendMessage('开始');
+    expect(provider.error, isNull);
+    expect(provider.selectedContact!.continuity.revision, 1);
+    expect(provider.selectedContact!.worldBook.locations.single.name, '旧车站');
+    final backup = await provider.exportBackupJson();
+    expect(jsonDecode(backup)['contacts'][0]['continuity']['revision'], 1);
+
+    provider.dispose();
+    provider = ChatProvider(
+        persistence: persistence,
+        repository: ChatRepository(aiService: aiService));
+    await provider.initialize();
+    expect(provider.selectedContact!.continuity.values['actor/林夏/outfit'],
+        '白衬衫、黑裙');
+    aiService.mainResponse =
+        _stateReply(1, [_change('scene/location', '车站', '屋内')]);
+    await provider.sendMessage('进屋');
+    expect(provider.error, isNull);
+    expect(provider.selectedContact!.continuity.values['scene/location'], '屋内');
+    expect(provider.selectedContact!.continuity.values['actor/林夏/outfit'],
+        '白衬衫、黑裙');
+    expect(await provider.recallLastTurn(), isTrue);
+    expect(provider.selectedContact!.continuity.values['scene/location'], '车站');
+    expect(provider.selectedContact!.continuity.revision, 1);
+    expect(provider.selectedContact!.worldBook.locations.single.name, '旧车站');
+    expect(await provider.restoreBackupJson(backup), isTrue);
+    expect(provider.selectedContact!.continuity.revision, 1);
+  });
+
+  test('旧值不符整轮拒绝，不写入正文或任何部分记忆', () async {
+    aiService.mainResponse =
+        _stateReply(0, [_change('scene/location', null, '车站')]);
+    await provider.sendMessage('开始');
+    aiService.mainResponse = _stateReply(1, [
+      _change('actor/林夏/outfit', null, '蓝裙'),
+      _change('scene/location', '公园', '屋内'),
+    ]);
+    await provider.sendMessage('继续');
+    expect(provider.messages, hasLength(3));
+    expect(provider.messages.last.status, MessageStatus.failed);
+    expect(provider.selectedContact!.continuity.values,
+        {'scene/location': '车站', 'actor/林夏/outfit': ''});
+    expect(persistence.snapshot.contacts.single.continuity.revision, 1);
+    expect(provider.selectedContact!.eventGraph.turnCount, 1);
+    expect(aiService.requestedModels, hasLength(2));
+  });
+
+  test('同一时刻连续发送只启动一轮', () async {
+    aiService.pendingMain = Completer<String>();
+    final first = provider.sendMessage('第一条');
+    final duplicate = provider.sendMessage('第二条');
+    await Future<void>.delayed(Duration.zero);
+    aiService.pendingMain!.complete('{"memoryPatch":{},"reply":"收到"}');
+    await Future.wait([first, duplicate]);
+    expect(aiService.requestedModels, hasLength(1));
+    expect(provider.messages, hasLength(2));
+  });
+
+  test('一次摘要只标记实际发送给模型的源事件', () async {
+    provider.dispose();
+    persistence.snapshot = ChatSnapshot(contacts: [
+      _contact().copyWith(
+        eventGraph: EventGraphMemory(shortTermQueue: [
+          for (var i = 0; i < 12; i++)
+            EventNode(
+                id: 'old-$i',
+                tier: EventTier.shortTerm,
+                event: EventMemory(description: '旧事件$i'),
+                createdAtMs: 12 - i),
+        ]),
+      )
+    ]);
+    provider = ChatProvider(
+        persistence: persistence,
+        repository: ChatRepository(aiService: aiService));
+    await provider.initialize();
+    aiService.mainResponse =
+        '{"memoryPatch":{"summary":{"description":"指定十条事件的总结"},"eventBrief":{"description":"新事件"}},"reply":"继续。"}';
+    await provider.sendMessage('继续');
+    expect(provider.error, isNull);
+    final nodes = provider.selectedContact!.eventGraph.shortTermQueue;
+    expect(nodes.where((n) => n.summarized), hasLength(10));
+    expect(nodes.singleWhere((n) => n.id == 'old-10').summarized, isFalse);
+    expect(nodes.singleWhere((n) => n.id == 'old-11').summarized, isFalse);
+  });
+
+  test('模型自行总结不会丢弃原有事件或加入未请求的摘要', () async {
+    aiService.mainResponse =
+        '{"memoryPatch":{"summary":{"description":"擅自概括"},"eventBrief":{"description":"本轮事件"}},"reply":"继续。"}';
+    await provider.sendMessage('继续');
+    expect(provider.selectedContact!.eventGraph.longTermQueue, isEmpty);
     expect(
-      await provider.applyReplyCandidate(messageId, '另一个候选回复'),
-      isTrue,
-    );
-    expect(provider.messages.last.content, '另一个候选回复');
-    expect(provider.messages.last.alternatives, contains('原回复'));
+        provider.selectedContact!.eventGraph.shortTermQueue.single.summarized,
+        isFalse);
+  });
+
+  test('实际发送的system逐字复用，状态在动态输入且上一轮正文保留原生角色', () async {
+    aiService.mainResponse =
+        _stateReply(0, [_change('actor/林夏/outfit', null, '白衬衫')]);
+    await provider.sendMessage('开始');
+    aiService.mainResponse =
+        '{"memoryPatch":{"worldKnowledge":["发现旧站台"]},"reply":"我记住了。"}';
+    await provider.sendMessage('继续');
+    await provider.sendMessage('再继续');
+    expect(aiService.systemPrompts.toSet(), hasLength(1));
+    expect(
+        RegExp('"protocolVersion"').allMatches(aiService.systemPrompts.first),
+        hasLength(1));
+    expect(aiService.userPrompts.last, contains('发现旧站台'));
+    expect(aiService.userPrompts.last, contains('白衬衫'));
+    expect(aiService.userPrompts.last, isNot(contains('我记住了。')));
+    expect(aiService.histories.last.last.role, 'assistant');
+    expect(aiService.histories.last.last.content, '我记住了。');
+  });
+
+  test('流式JSON中断不能把已显示草稿标为成功或写入状态', () async {
+    await provider.saveProviderSettings(const ProviderSettings(
+        llm: LlmProfile(
+            apiKey: 'test-key', parameters: LlmParameters(stream: true))));
+    aiService.mainResponse = '{"memoryPatch":{},"reply":"未完成';
+    await provider.sendMessage('继续');
+    expect(provider.messages.last.content, '未完成');
+    expect(
+        provider.messages
+            .every((message) => message.status == MessageStatus.failed),
+        isTrue);
+    expect(provider.selectedContact!.eventGraph.turnCount, 0);
+  });
+
+  test('事务写入失败，正文和状态不留下成功的半轮', () async {
+    persistence.failCompletedSave = true;
+    aiService.mainResponse =
+        _stateReply(0, [_change('scene/location', null, '车站')]);
+    await provider.sendMessage('开始');
+    expect(provider.error, isNotNull);
+    expect(provider.selectedContact!.continuity.revision, 0);
+    expect(
+        provider.messages
+            .every((message) => message.status == MessageStatus.failed),
+        isTrue);
+    expect(persistence.snapshot.contacts.single.continuity.revision, 0);
   });
 
   test('记忆锁跨重启持久化并阻止作废和删除', () async {
@@ -333,6 +504,9 @@ class _FakeAiService extends AiService {
   StreamController<String>? pendingStream;
   final Set<String> failingModels = <String>{};
   final List<String> requestedModels = <String>[];
+  final List<String> systemPrompts = [];
+  final List<String> userPrompts = [];
+  final List<List<AiChatMessage>> histories = [];
 
   @override
   Future<String> ask(
@@ -340,6 +514,8 @@ class _FakeAiService extends AiService {
     required String contactId,
     required String contactName,
     String? systemPrompt,
+    List<AiChatMessage> history = const <AiChatMessage>[],
+    bool requireJsonObject = false,
     LlmProfile? profile,
     RecallRequestBudget? requestBudget,
   }) async {
@@ -347,6 +523,9 @@ class _FakeAiService extends AiService {
       return '{"keywords":["车票"],"theme":[]}';
     }
     requestedModels.add(profile?.model ?? '');
+    systemPrompts.add(systemPrompt ?? '');
+    userPrompts.add(prompt);
+    histories.add(List<AiChatMessage>.from(history));
     if (failingModels.contains(profile?.model)) {
       throw const AiServiceException('模拟 Profile 失败');
     }
@@ -363,8 +542,11 @@ class _FakeAiService extends AiService {
     required String contactId,
     required String contactName,
     String? systemPrompt,
+    List<AiChatMessage> history = const <AiChatMessage>[],
+    bool requireJsonObject = false,
     LlmProfile? profile,
   }) {
+    histories.add(List<AiChatMessage>.from(history));
     final stream = pendingStream;
     if (stream != null) return stream.stream;
     return Stream<String>.value(mainResponse);
@@ -375,6 +557,7 @@ class _MemoryPersistence implements ChatPersistence {
   _MemoryPersistence(this.snapshot);
 
   ChatSnapshot snapshot;
+  bool failCompletedSave = false;
   final Map<String, String> metadata = <String, String>{};
 
   @override
@@ -394,6 +577,13 @@ class _MemoryPersistence implements ChatPersistence {
     required List<Message> messages,
     Map<String, String> metadataUpdates = const <String, String>{},
   }) async {
+    if (failCompletedSave &&
+        messages.any((m) =>
+            m.role == MessageRole.assistant &&
+            m.status == MessageStatus.sent)) {
+      failCompletedSave = false;
+      throw StateError('模拟事务失败');
+    }
     final contacts = <Contact>[
       ...snapshot.contacts.where((item) => item.id != contact.id),
       contact.deepCopy(),
@@ -445,5 +635,18 @@ Contact _contact() => Contact(
       name: '林夏',
       avatar: '',
       fixedInput: '你是林夏。',
+      currentStates: {'scene/location': '', 'actor/林夏/outfit': ''},
       createdAt: DateTime.fromMillisecondsSinceEpoch(1),
     );
+
+Map<String, dynamic> _change(String key, String? from, String to) =>
+    {'key': key, 'from': from ?? '', 'to': to, 'evidence': to};
+String _stateReply(int revision, List<Map<String, dynamic>> changes) =>
+    jsonEncode({
+      'protocolVersion': 'roleplay-memory-v3',
+      'memoryPatch': {
+        'eventBrief': {'description': '她点了点头'},
+        'stateTransition': {'baseRevision': revision, 'changes': changes},
+      },
+      'reply': '此刻：${changes.map((change) => change['to']).join('；')}。',
+    });

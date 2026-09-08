@@ -1,6 +1,8 @@
 # AI 角色扮演对话应用
 
-> 基于 Flutter 的本地 AI 角色/故事对话应用：长期记忆、低成本 Agent 式事件召回、三级级联、opencode 助手桥接。
+> 基于 Flutter 的本地 AI 角色/故事对话应用：手动故事状态、持久化剧情回滚、稳定提示词前缀与低成本事件召回。
+
+当前工作区的连续性与成本重构说明见 [CONTINUITY_REFACTOR.md](docs/CONTINUITY_REFACTOR.md)，Agent 式提示词组织说明见 [AGENT_PROMPT_REFACTOR.md](docs/AGENT_PROMPT_REFACTOR.md)。
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.41.2-02569B)](.) [![Dart](https://img.shields.io/badge/Dart-3.11%2B-0175C2)](.) [![License](https://img.shields.io/badge/license-private-lightgrey)](.)
 
@@ -10,7 +12,7 @@
 
 单设备、本地存储优先的 AI 角色扮演 App。长期记忆不会由项目自建云端保存；生成时只把本轮所需的角色上下文发送到用户自行配置的 LLM HTTP 服务（base URL + API Key）。
 
-> 📐 想看完整架构与数据流图：见 [docs/architecture.html](docs/architecture.html)（含 mermaid 流程图、状态机、数据存储布局、参数对照表）。
+> 新版状态与事务行为以 [连续性重构说明](docs/CONTINUITY_REFACTOR.md) 为准。想看此前的完整架构与数据流图：见 [docs/architecture.html](docs/architecture.html)（含 mermaid 流程图、状态机、数据存储布局、参数对照表）。
 
 ## 三种联系人
 
@@ -22,25 +24,30 @@
 
 ## 核心能力
 
+- **统一手机视觉与资料编辑**：浅色/深色系统主题、圆角分组、消息与导航动效；点击顶部信息栏、聊天头像或侧栏头像编辑名字、角色设定、状态和知识。头像支持 JPG/JPEG、PNG、WebP，照片压缩后随本地备份保存，详见 [UI 与资料编辑说明](docs/UI_PROFILE_v2.5.0.md)。
+
+- **按故事配置状态**：手动定义名称、记录说明、初值与更新规则；定义和当前值分开保存，可改名、排序、删除和清空。状态增量校验 ID、版本、旧值和文本格式，完整值不被摘要裁剪
+- **Agent 式提示词分层**：system 依次放置不可覆盖的运行契约、用户行为指令、完整角色配置、世界书和状态定义；权威状态与召回记忆作为本轮上下文，最近对话使用原生 `user/assistant` 消息发送
+- **流式友好的 v5 协议**：JSON 固定按 `protocolVersion → reply → memoryPatch` 序列化，使正文可先显示；记忆支持 `add / replace / remove`，旧事实失效或物品丢失时不会只增不减
 - **三级记忆级联**：短期 → 长期 → 超长期，阈值触发 + LLM 压缩；对话 Prompt 默认保留短期 10、长期 1、超长期 2 条热记忆，详见 [架构图](docs/architecture.html#memory-tiers)
 - **低成本 Agent 式事件召回**：固定执行 `L0 → PLAN → JUDGE` 状态机。L0 只匹配模型已写入的完整关键词、主题和关系键，不分词、不做模糊字符匹配；结果明确时 0 次额外调用，只有歧义时才自适应使用 1–2 次小模型调用
 - **严格请求预算**：单轮事件召回最多 2 个实际 HTTP POST；超时、网络失败和 404/405 兼容端点探测同样扣减预算，已验证端点会缓存。召回失败只退化为本地结果，不阻断正文模型
 - **事件间边关系**：LLM 通过 `relatedEventIds` 声明强关联，**硬上限 2 个**；LRU 排序按关键词 + 邻居 + 物品/设定 关联权重综合打分
 - **三种创建方式**：表单 / JSON 导入 / 自然语言描述（LLM 转 JSON）
-- **撤回最近一轮**：基于 snapshot，可恢复消息列表 + 联系人
+- **持久化撤回**：重启后仍能连续撤回，恢复消息、配置、状态和完整记忆
 - **流式输出与停止**：OpenAI 兼容 SSE 流式回复逐块显示；流式/非流式请求均可立即停止并保留明确状态
-- **消息操作与候选回复**：支持复制、引用、编辑、删除，以及为任意消息生成、保存和切换候选回复
+- **一致的消息修改**：重发、修改后重发、删除均先撤销目标轮及后续剧情，正文和记忆同步回滚；旧历史缺少可靠检查点时拒绝部分删除
 - **停止与安全重生成**：可修改上一轮输入，在完整撤回旧回复和旧记忆后重新生成
 - **会话搜索与用量估算**：搜索完整会话历史、预览上下文，并估算当前窗口 Token 与费用
-- **多 LLM Profile**：可保存多个正文 Profile、快速切换、批量健康检查，并为 PLAN/JUDGE 单独配置廉价事件召回模型；独立召回模型失败时不会误切到昂贵正文模型
+- **多 LLM Profile**：可保存多个正文 Profile、快速切换、批量健康检查，并为每个 Profile 独立设置输出上限和兼容的 JSON 响应模式；PLAN/JUDGE 可单独配置廉价事件召回模型
 - **可视化记忆档案**：三标签页（列表/时间线/召回调试），按层级和状态筛选，关键词搜索，来源对话追踪，每条记忆的事件关系边和邻居节点可视化，完整召回调试信息展示
 - **世界书系统**：地点、组织、规则、时间线事件的独立管理，四标签页 UI，自动注入 LLM Prompt 作为角色行为参考
 - **图片画廊与缓存**：生图自动缓存到本地文件系统，LRU 淘汰；网格画廊支持角色筛选、全屏预览；角色外观一致性算法（特征签名 + 种子锁定 + 参考图）确保同一角色图片风格一致
 - **TTS 音色与播放**：联系人编辑页可试听音色，聊天消息可拉取真实音频并通过系统媒体播放器播放/停止
-- **SQLite 本地数据库**：联系人、消息、三级事件、边和关系队列规范化存储，一轮对话原子提交
+- **SQLite 本地数据库**：正文、状态、知识、事件图、轮次日志和自动检查点在同一事务提交；检查点用位置与版本保存，避免逐轮复制完整正文
 - **万级消息分页**：启动只载入当前会话最近 100 条，可向前加载；完整备份仍包含全部历史
 - **剧情检查点与分支**：成功轮次自动建立可逆检查点，可从历史回复创建、切换、重命名和备份剧情分支
-- **完整本地备份**：版本化 JSON 备份角色、消息和事件图；恢复不会覆盖 API、模型和应用设置
+- **完整本地备份**：版本化 JSON 保存角色、消息、事件图、分支和可逆日志，单个事务恢复；不覆盖 API、模型和应用设置
 - **调试模式**：显示完整 prompt + 召回阶段、实际 POST 数、激活词项与选中事件
 - **应用设置**：20 项可调（详见 [应用设置](#应用设置)）
 
@@ -117,14 +124,14 @@ sequenceDiagram
     RC-->>CP: RecallOutcome(nodes, activeTerms, phase, postCount)
     CP->>CO: composeSystemPromptWithContactObject
     CO-->>CP: systemPrompt
-    CP->>AS: askAi(prompt)
+    CP->>AS: askAi(currentInput, nativeHistory)
     AS->>LL: POST chat/completions
     LL-->>AS: {reply, memoryPatch}
     AS-->>CP: 响应
     CP->>PR: extractReply + extractMemoryPatch
     CP->>CP: _updateContactFromMemoryPatch
-    Note over CP: 合并知识 / 事件 → short-term /<br/>summary? → long-term /<br/>belongings / states / edges / LRU
-    CP->>DB: 同一事务提交联系人、事件图与消息
+    Note over CP: 新增/替换/删除知识与物品 /<br/>事件分层 / states / edges / LRU
+    CP->>DB: 同一事务提交正文、状态、事件图、日志与检查点
     CP-->>U: UI 刷新
 ```
 
@@ -161,10 +168,10 @@ flowchart TD
 - **2→3** 触发：长期 un-summarized ≥ `ultraSummaryThreshold`（默认 5），**仅在 1→2 未触发时**
   - 同样 LLM 输出 `summary`，进入超长期 un-summarized
   - 旧长期 entry 留在长期原位并标记 summarized，不批量复制到超长期
-- LLM 也可在场景/话题结束时**自主**输出 summary（不强制时）
+- summary 仅按阈值请求；只标记实际发送给模型的源节点，自主输出的摘要不应用
 - 调 `ultraSummaryThreshold = 999` 即禁用 2→3
 
-> LLM 输出 summary 的提示词在 `_buildRules(mustSummarize: ...)` 区分强制 vs 自主。
+> 总结要求放在动态上下文中，不改变固定 system；总结失败保留原事件。
 
 ## 边关系
 
@@ -270,7 +277,7 @@ API 提供商页另有“召回”标签：关闭独立配置时，额外召回�
 - **结构化词项质量决定召回上限**：V1 依赖正文模型写入的 `keywords/theme` 与物品/设定关系键；别名未统一或事件漏标时不会用分词、n-gram、编辑距离、拼音、Embedding 或向量检索猜测
 - **无结构化连续性时不会额外调用**：当前输入未命中，且最近 4 条有效对话也没有指向冷记忆的规范词项时，状态机以 0 POST 结束；这是控制 roleplay 长对话费用的设计取舍
 - **向量记忆未启用**：旧数据兼容仍保留 `vectorSimilarityWeight` 设置字段，但 Agent 召回运行时不使用
-- **任意历史消息完整重生成未完成**：当前完整撤回并重生成只支持最近一轮；任意消息已支持候选回复与从检查点创建分支
+- **旧历史回滚有边界**：升级前的消息仅在存在完全匹配的检查点且记忆元数据可恢复时支持截断；升级后的轮次记录完整恢复依据
 - **语音输入/音频消息/字幕未完成**：当前已完成 TTS 音色配置、真实播放和停止
 - SSH 模式在 `OpencodeService._executeViaSsh` 里是占位，**实际只支持 HTTP**
 - opencode 的 `POST /session/:id/message` 是同步等待；超长 AI 任务（>300s）会撞默认超时
@@ -292,11 +299,13 @@ flutter build apk --release
 
 ## 下载
 
-正式版本通过 GitHub Releases 分发；本地验收构建同时放在 `releases/app-release.apk`：
+当前版本 **v2.5.1（构建号 11）**：
 
-👉 **[Releases 页面](https://github.com/shoelace66/ai_roleplay_chat/releases)** — 下载 `app-release.apk` 后直接安装。
+- [下载 Android APK](https://github.com/shoelace66/ai_roleplay_chat/releases/download/v2.5.1/ai-roleplay-chat-v2.5.1-glass-ui.apk)
+- [版本说明与附件](https://github.com/shoelace66/ai_roleplay_chat/releases/tag/v2.5.1)
+- [SHA-256 校验文件](releases/ai-roleplay-chat-v2.5.1-glass-ui.apk.sha256)
 
-版本变化与升级说明见 [v2.3.0 Release Notes](docs/RELEASE_NOTES_v2.3.0.md)。
+本版包含 Agent 式提示词、持久化剧情回滚、API 与 JSON 导入修复、照片头像和资料编辑，以及统一主题与局部毛玻璃。完整说明见 [v2.5.1 Release Notes](docs/RELEASE_NOTES_v2.5.1.md)。
 
 > 从旧版本升级前，建议先在聊天页右上角打开“本地备份”，复制完整备份。新版本会自动把旧 SharedPreferences 联系人和消息迁移到 SQLite。
 

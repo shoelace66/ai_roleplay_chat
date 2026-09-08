@@ -28,8 +28,12 @@ class ChatMessageList extends StatelessWidget {
     required this.onGenerateCandidate,
     required this.onShowCandidates,
     this.assistantLabel,
+    this.assistantAvatar = '',
+    this.onEditProfile,
+    this.protectContinuity = false,
   });
 
+  final bool protectContinuity;
   final List<Message> messages;
   final ScrollController controller;
   final bool isTyping;
@@ -52,6 +56,8 @@ class ChatMessageList extends StatelessWidget {
   final ValueChanged<Message> onGenerateCandidate;
   final ValueChanged<Message> onShowCandidates;
   final String? assistantLabel;
+  final String assistantAvatar;
+  final VoidCallback? onEditProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -97,33 +103,41 @@ class ChatMessageList extends StatelessWidget {
         final message = entry.message;
         return RepaintBoundary(
           key: ValueKey('${message.id}-${entry.image ? "image" : "text"}'),
-          child: entry.image
-              ? ImageMessageBubble(message: message)
-              : MessageBubble(
-                  message: message,
-                  onRetry: () => onRetry(message),
-                  onGenerateImage: () => onGenerateImage(message),
-                  onRegenerate:
-                      canRegenerateLastTurn && message.id == latestAssistantId
-                          ? onRegenerate
-                          : null,
-                  onCreateBranch: canCreateBranch(message)
-                      ? () => onCreateBranch(message)
-                      : null,
-                  onSpeak: () => onSpeak(message),
-                  onStopSpeak: onStopSpeak,
-                  isSpeaking: isSpeaking(message),
-                  onEdit: () => onEdit(message),
-                  onDelete: () => onDelete(message),
-                  onQuote: () => onQuote(message),
-                  onGenerateCandidate: () => onGenerateCandidate(message),
-                  authorLabel: message.role == MessageRole.assistant
-                      ? assistantLabel
-                      : null,
-                  onShowCandidates: message.alternatives.isEmpty
-                      ? null
-                      : () => onShowCandidates(message),
-                ),
+          child: AnimatedMessageBubble(
+            enabled: messageIndex == entries.length - 1,
+            child: entry.image
+                ? ImageMessageBubble(message: message)
+                : MessageBubble(
+                    message: message,
+                    avatar: assistantAvatar,
+                    onEditProfile: onEditProfile,
+                    allowCandidates: !protectContinuity,
+                    storyDeletion: protectContinuity,
+                    allowHistoryEdits: !protectContinuity,
+                    onRetry: () => onRetry(message),
+                    onGenerateImage: () => onGenerateImage(message),
+                    onRegenerate:
+                        canRegenerateLastTurn && message.id == latestAssistantId
+                            ? onRegenerate
+                            : null,
+                    onCreateBranch: canCreateBranch(message)
+                        ? () => onCreateBranch(message)
+                        : null,
+                    onSpeak: () => onSpeak(message),
+                    onStopSpeak: onStopSpeak,
+                    isSpeaking: isSpeaking(message),
+                    onEdit: () => onEdit(message),
+                    onDelete: () => onDelete(message),
+                    onQuote: () => onQuote(message),
+                    onGenerateCandidate: () => onGenerateCandidate(message),
+                    authorLabel: message.role == MessageRole.assistant
+                        ? assistantLabel
+                        : null,
+                    onShowCandidates: message.alternatives.isEmpty
+                        ? null
+                        : () => onShowCandidates(message),
+                  ),
+          ),
         );
       },
     );

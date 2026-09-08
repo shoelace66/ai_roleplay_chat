@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter_chat_demo/core/data/models/provider_settings.dart';
 import 'package:flutter_chat_demo/features/chat/data/datasources/sqlite_chat_persistence.dart';
 import 'package:flutter_chat_demo/features/chat/data/models/contact.dart';
@@ -30,6 +31,7 @@ void main() {
           id: 'role-1',
           name: '林夏',
           avatar: '',
+          currentStates: {'scene/location': ''},
           createdAt: DateTime.fromMillisecondsSinceEpoch(1),
         ),
       ],
@@ -84,6 +86,41 @@ void main() {
     expect(provider.messages.last.content, '主分支第二轮');
   });
 
+  test('切换剧情分支同时恢复场景状态版本', () async {
+    String response(int revision, String? from, String to) => jsonEncode({
+          'protocolVersion': 'roleplay-memory-v3',
+          'memoryPatch': {
+            'eventBrief': {'description': '抵达$to'},
+            'stateTransition': {
+              'baseRevision': revision,
+              'changes': [
+                {
+                  'key': 'scene/location',
+                  'from': from ?? '',
+                  'to': to,
+                  'evidence': '抵达$to'
+                },
+              ]
+            },
+          },
+          'reply': '抵达$to。',
+        });
+    aiService.rawResponse = response(0, null, '车站');
+    await provider.sendMessage('去车站');
+    final checkpoint = provider.conversationCheckpoints.single;
+    final mainId = provider.activeConversationBranch!.id;
+    aiService.rawResponse = response(1, '车站', '屋内');
+    await provider.sendMessage('进屋');
+    expect(
+        await provider.createBranchFromCheckpoint(checkpoint.id, name: '留在车站'),
+        isTrue);
+    expect(provider.selectedContact!.continuity.values['scene/location'], '车站');
+    expect(provider.selectedContact!.continuity.revision, 1);
+    expect(await provider.switchConversationBranch(mainId), isTrue);
+    expect(provider.selectedContact!.continuity.values['scene/location'], '屋内');
+    expect(provider.selectedContact!.continuity.revision, 2);
+  });
+
   test('失败轮次不会创建检查点', () async {
     aiService.failure = const AiServiceException('模拟失败');
 
@@ -119,6 +156,7 @@ void main() {
 
 class _TimelineAiService extends AiService {
   String replyText = '默认回复';
+  String? rawResponse;
   AiServiceException? failure;
 
   @override
@@ -127,6 +165,8 @@ class _TimelineAiService extends AiService {
     String? contactId,
     String? contactName,
     String? systemPrompt,
+    List<AiChatMessage> history = const <AiChatMessage>[],
+    bool requireJsonObject = false,
     LlmProfile? profile,
     RecallRequestBudget? requestBudget,
   }) async {
@@ -135,6 +175,7 @@ class _TimelineAiService extends AiService {
     }
     final currentFailure = failure;
     if (currentFailure != null) throw currentFailure;
+    if (rawResponse != null) return rawResponse!;
     return '{"memoryPatch":{"eventBrief":{"description":"$replyText"}},'
         '"reply":"$replyText"}';
   }

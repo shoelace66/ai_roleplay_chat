@@ -33,7 +33,10 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage>
   }
 
   void _setLlm(LlmProfile llm) {
-    setState(() => _settings = _settings.copyWith(llm: llm));
+    // Text input (especially Android IME composition) must not rebuild the
+    // whole settings page for every character. The latest immutable draft is
+    // still read when Save or a profile action is tapped.
+    _settings = _settings.copyWith(llm: llm);
   }
 
   void _setMemoryRecallEnabled(bool enabled) {
@@ -61,9 +64,7 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage>
   }
 
   void _setMemoryRecallLlm(LlmProfile profile) {
-    setState(() {
-      _settings = _settings.copyWith(memoryRecallLlm: profile);
-    });
+    _settings = _settings.copyWith(memoryRecallLlm: profile);
   }
 
   void _activateLocalLlm(LlmProfile profile) {
@@ -111,11 +112,11 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage>
   }
 
   void _setImage(ImageProfile image) {
-    setState(() => _settings = _settings.copyWith(image: image));
+    _settings = _settings.copyWith(image: image);
   }
 
   void _setTts(TtsProfile tts) {
-    setState(() => _settings = _settings.copyWith(tts: tts));
+    _settings = _settings.copyWith(tts: tts);
   }
 
   @override
@@ -184,7 +185,7 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage>
               const Divider(height: 1),
               Expanded(
                 child: _LlmTab(
-                  key: ValueKey(_settings.llm),
+                  key: const ValueKey('mainLlm'),
                   profile: _settings.llm,
                   onChanged: _setLlm,
                 ),
@@ -301,6 +302,12 @@ class _LlmTabState extends State<_LlmTab> {
     _draft = widget.profile;
   }
 
+  @override
+  void didUpdateWidget(covariant _LlmTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _draft = widget.profile;
+  }
+
   void _applyPreset(String presetId, {String? model}) {
     final next = _draft
         .copyWith(presetId: presetId)
@@ -312,6 +319,11 @@ class _LlmTabState extends State<_LlmTab> {
   void _updateDraft(LlmProfile Function(LlmProfile) mapper) {
     final next = mapper(_draft);
     setState(() => _draft = next);
+    widget.onChanged(_draft);
+  }
+
+  void _updateTextDraft(LlmProfile Function(LlmProfile) mapper) {
+    _draft = mapper(_draft);
     widget.onChanged(_draft);
   }
 
@@ -346,7 +358,7 @@ class _LlmTabState extends State<_LlmTab> {
           label: 'API Key',
           initialValue: _draft.apiKey,
           obscure: _obscureKey,
-          onChanged: (v) => _updateDraft((d) => d.copyWith(apiKey: v)),
+          onChanged: (v) => _updateTextDraft((d) => d.copyWith(apiKey: v)),
           suffix: IconButton(
             icon: Icon(_obscureKey
                 ? Icons.visibility_outlined
@@ -357,7 +369,7 @@ class _LlmTabState extends State<_LlmTab> {
         _LabeledTextField(
           label: 'Base URL',
           initialValue: _draft.baseUrl,
-          onChanged: (v) => _updateDraft((d) => d.copyWith(baseUrl: v)),
+          onChanged: (v) => _updateTextDraft((d) => d.copyWith(baseUrl: v)),
           hint: 'https://api.openai.com/v1',
         ),
         _ModelDropdownOrInput(
@@ -393,14 +405,27 @@ class _LlmTabState extends State<_LlmTab> {
           ),
         ),
         _NumberSetting(
-          title: '最大 Token',
-          subtitle: '单次回复的最大 token 数（0 = 不限制）',
+          title: '输出上限（max_tokens）',
+          subtitle: '当前 API Profile 单次响应的最大 token 数（0 = 不限制）',
           value: _draft.parameters.maxTokens,
           min: 0,
-          max: 32000,
-          step: 64,
+          max: 131072,
+          step: 256,
           onChanged: (v) => _updateDraft(
             (d) => d.copyWith(parameters: d.parameters.copyWith(maxTokens: v)),
+          ),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('JSON 响应模式'),
+          subtitle: const Text(
+            '对角色对话请求发送 response_format=json_object；仅在当前 API 支持时开启。',
+          ),
+          value: _draft.parameters.useJsonResponseFormat,
+          onChanged: (value) => _updateDraft(
+            (d) => d.copyWith(
+              parameters: d.parameters.copyWith(useJsonResponseFormat: value),
+            ),
           ),
         ),
         _SliderSetting(
@@ -502,6 +527,12 @@ class _ImageTabState extends State<_ImageTab> {
   @override
   void initState() {
     super.initState();
+    _draft = widget.profile;
+  }
+
+  @override
+  void didUpdateWidget(covariant _ImageTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
     _draft = widget.profile;
   }
 
@@ -653,6 +684,12 @@ class _TtsTabState extends State<_TtsTab> {
   @override
   void initState() {
     super.initState();
+    _draft = widget.profile;
+  }
+
+  @override
+  void didUpdateWidget(covariant _TtsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
     _draft = widget.profile;
   }
 
@@ -870,17 +907,41 @@ class _LabeledTextField extends StatefulWidget {
 
 class _LabeledTextFieldState extends State<_LabeledTextField> {
   late final TextEditingController _ctrl;
+  late final FocusNode _focusNode;
 
   @override
   void initState() {
     super.initState();
     _ctrl = TextEditingController(text: widget.initialValue);
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LabeledTextField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Only external changes (profile/preset switches) replace the editor value.
+    // Keystrokes already live in the controller, including IME composition.
+    if (_ctrl.text != widget.initialValue) {
+      _ctrl.value = TextEditingValue(
+        text: widget.initialValue,
+        selection: TextSelection.collapsed(offset: widget.initialValue.length),
+      );
+    }
   }
 
   @override
   void dispose() {
     _ctrl.dispose();
+    _focusNode.dispose();
     super.dispose();
+  }
+
+  void _requestKeyboard() {
+    _focusNode.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_focusNode.hasFocus) return;
+      SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    });
   }
 
   @override
@@ -888,9 +949,13 @@ class _LabeledTextFieldState extends State<_LabeledTextField> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: TextField(
+        key: ValueKey('provider-field-${widget.label}'),
         controller: _ctrl,
+        focusNode: _focusNode,
         obscureText: widget.obscure,
         maxLines: widget.obscure ? 1 : null,
+        keyboardType: TextInputType.text,
+        textInputAction: TextInputAction.next,
         decoration: InputDecoration(
           labelText: widget.label,
           hintText: widget.hint,
@@ -898,6 +963,7 @@ class _LabeledTextFieldState extends State<_LabeledTextField> {
           isDense: true,
           suffixIcon: widget.suffix,
         ),
+        onTap: _requestKeyboard,
         onChanged: widget.onChanged,
       ),
     );
@@ -1062,17 +1128,45 @@ class _NumberSetting extends StatefulWidget {
 
 class _NumberSettingState extends State<_NumberSetting> {
   late int _draftValue;
+  late final TextEditingController _controller;
 
   @override
   void initState() {
     super.initState();
     _draftValue = widget.value;
+    _controller = TextEditingController(text: widget.value.toString());
+  }
+
+  @override
+  void didUpdateWidget(covariant _NumberSetting oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) {
+      _draftValue = widget.value;
+      if (int.tryParse(_controller.text) != widget.value) {
+        _setText(widget.value);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _setText(int value) {
+    final text = value.toString();
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
   }
 
   void _bump(int delta) {
     final next = (_draftValue + delta).clamp(widget.min, widget.max);
     if (next == _draftValue) return;
     setState(() => _draftValue = next);
+    _setText(next);
     widget.onChanged(next);
   }
 
@@ -1095,10 +1189,7 @@ class _NumberSettingState extends State<_NumberSetting> {
             Expanded(
               child: TextField(
                 textAlign: TextAlign.center,
-                controller: TextEditingController(text: _draftValue.toString())
-                  ..selection = TextSelection.collapsed(
-                    offset: _draftValue.toString().length,
-                  ),
+                controller: _controller,
                 keyboardType: TextInputType.number,
                 inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
@@ -1113,6 +1204,7 @@ class _NumberSettingState extends State<_NumberSetting> {
                   final parsed = int.tryParse(raw) ?? _draftValue;
                   final next = parsed.clamp(widget.min, widget.max);
                   setState(() => _draftValue = next);
+                  _setText(next);
                   widget.onChanged(next);
                 },
               ),

@@ -14,6 +14,7 @@ class Message {
     required this.content,
     required this.createdAt,
     this.status = MessageStatus.sent,
+    this.turnId,
     this.imageUrl,
     this.imagePrompt,
     this.originalPrompt,
@@ -21,6 +22,7 @@ class Message {
   });
 
   final String id;
+  final String? turnId;
   final MessageRole role;
   final String content;
   final DateTime createdAt;
@@ -43,6 +45,7 @@ class Message {
     final originalPromptRaw = (json['originalPrompt'] ?? '').toString();
     return Message(
       id: (json['id'] ?? '').toString(),
+      turnId: json['turnId'] as String?,
       role: roleText == MessageRole.assistant.name
           ? MessageRole.assistant
           : MessageRole.user,
@@ -77,6 +80,7 @@ class Message {
       'createdAtMs': createdAt.millisecondsSinceEpoch,
       'status': status.name,
     };
+    if (turnId != null) json['turnId'] = turnId;
     if (imageUrl != null && imageUrl!.isNotEmpty) {
       json['imageUrl'] = imageUrl;
     }
@@ -97,6 +101,7 @@ class Message {
   }) {
     return Message(
       id: id,
+      turnId: turnId,
       role: role,
       content: content ?? this.content,
       createdAt: createdAt,

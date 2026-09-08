@@ -37,6 +37,7 @@ class ConversationCheckpoint {
     this.sourceMessageId,
     this.label = '',
     this.isKey = false,
+    this.storyRevision,
   });
 
   final String id;
@@ -47,6 +48,7 @@ class ConversationCheckpoint {
   final DateTime createdAt;
   final int messageCount;
   final bool isKey;
+  final int? storyRevision;
 }
 
 class ConversationBranchSnapshot {
@@ -76,10 +78,12 @@ class ConversationCheckpointSnapshot {
 class ConversationTimelineArchive {
   const ConversationTimelineArchive({
     this.branches = const <ConversationBranchSnapshot>[],
+    this.journal = const <String, dynamic>{},
     this.checkpoints = const <ConversationCheckpointSnapshot>[],
   });
 
   final List<ConversationBranchSnapshot> branches;
+  final Map<String, dynamic> journal;
   final List<ConversationCheckpointSnapshot> checkpoints;
 
   bool get isEmpty => branches.isEmpty && checkpoints.isEmpty;

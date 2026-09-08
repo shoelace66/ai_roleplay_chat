@@ -1,6 +1,23 @@
+import '../../data/models/continuity_state.dart';
 import 'dart:convert';
 
 import '../../data/models/contact.dart';
+import 'contact_json_normalizer.dart';
+
+export 'contact_json_normalizer.dart' show ContactImportIssue;
+
+class ContactImportResult {
+  const ContactImportResult(
+      {this.data, this.normalizedJson, this.issues = const []});
+  final ContactImportData? data;
+  final String? normalizedJson;
+  final List<ContactImportIssue> issues;
+  bool get isSuccess => data != null;
+  List<ContactImportIssue> get errors =>
+      issues.where((issue) => issue.isError).toList();
+  String get errorMessage =>
+      errors.map((issue) => issue.description).join('\n');
+}
 
 class ContactImportFallback {
   const ContactImportFallback({
@@ -9,8 +26,10 @@ class ContactImportFallback {
     this.fixedInput = '',
     this.currentStates = const <String, String>{},
     this.voice = '',
+    this.continuity = const ContinuityState.empty(),
   });
 
+  final ContinuityState continuity;
   final String name;
   final String avatar;
   final String fixedInput;
@@ -21,6 +40,7 @@ class ContactImportFallback {
 class ContactImportData {
   const ContactImportData({
     required this.requestedId,
+    this.continuity = const ContinuityState.empty(),
     required this.name,
     required this.avatar,
     required this.fixedInput,
@@ -42,6 +62,7 @@ class ContactImportData {
     required this.voice,
   });
 
+  final ContinuityState continuity;
   final String requestedId;
   final String name;
   final String avatar;
@@ -76,6 +97,7 @@ class ContactImportData {
       category: category,
       fixedInput: fixedInput,
       currentStates: currentStates,
+      continuity: continuity,
       personality: personality,
       appearance: appearance,
       personalInfo: personalInfo,
@@ -106,25 +128,46 @@ class ContactImportParser {
   ContactImportData? parse(
     String source, {
     ContactImportFallback fallback = const ContactImportFallback(),
+  }) =>
+      parseDetailed(source, fallback: fallback).data;
+
+  ContactImportResult parseDetailed(
+    String source, {
+    ContactImportFallback fallback = const ContactImportFallback(),
   }) {
+    final normalized = ContactJsonNormalizer().normalize(source);
+    final issues = [...normalized.issues];
+    final json = normalized.json;
+    if (json == null) return ContactImportResult(issues: issues);
+    final name = _preferText(json['name'], fallback.name);
+    if (name.isEmpty) {
+      issues.add(const ContactImportIssue(
+          r'$.name', '缺少名称。请填写 name（也支持“名称”“角色名称”“故事名称”），或在表单填写名称。',
+          isError: true));
+    }
+    if (issues.any((issue) => issue.isError)) {
+      return ContactImportResult(issues: issues);
+    }
     try {
-      final decoded = jsonDecode(source);
-      if (decoded is! Map) return null;
-      final json = decoded.map(
-        (key, value) => MapEntry(key.toString(), value),
-      );
-      final name = _preferText(json['name'], fallback.name);
-      if (name.isEmpty) return null;
       final parsedStates = _stringMap(json['currentStates']);
 
-      return ContactImportData(
+      var configured = json['continuity'] != null
+          ? ContinuityState.fromJson(json['continuity'])
+          : fallback.continuity;
+      final canonical = json['continuity'] is Map &&
+          (json['continuity'] as Map)['definitions'] != null;
+      if (!canonical) {
+        configured = configured.withLegacy(parsedStates.isNotEmpty
+            ? parsedStates
+            : _normalizeMap(fallback.currentStates));
+      }
+      final data = ContactImportData(
+        continuity: configured,
         requestedId: _text(json['id']),
         name: name,
         avatar: _preferText(json['avatar'], fallback.avatar),
         fixedInput: _preferText(json['fixedInput'], fallback.fixedInput),
-        currentStates: parsedStates.isNotEmpty
-            ? parsedStates
-            : _normalizeMap(fallback.currentStates),
+        currentStates: configured.byName,
         personality: _stringList(json['personality']),
         appearance: _stringList(json['appearance']),
         personalInfo: _stringList(json['personalInfo']),
@@ -141,8 +184,16 @@ class ContactImportParser {
         time: _text(json['time']),
         voice: _preferText(json['voice'], fallback.voice),
       );
-    } on FormatException {
-      return null;
+      return ContactImportResult(
+        data: data,
+        normalizedJson: const JsonEncoder.withIndent('  ').convert(json),
+        issues: issues,
+      );
+    } on FormatException catch (error) {
+      return ContactImportResult(issues: [
+        ...issues,
+        ContactImportIssue(r'$.continuity', error.message, isError: true),
+      ]);
     }
   }
 

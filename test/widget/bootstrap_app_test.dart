@@ -26,6 +26,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('bootstrap-retry')));
     await tester.pumpAndSettle();
     expect(attempts, 2);
-    expect(find.text('Chat Demo'), findsOneWidget);
+    expect(find.text('AI 角色对话'), findsOneWidget);
   });
 }
