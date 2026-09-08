@@ -20,7 +20,14 @@ class ChatBackupCodec {
       'format': 'ai-roleplay-chat-backup',
       'version': currentVersion,
       'exportedAt': (exportedAt ?? DateTime.now()).toUtc().toIso8601String(),
-      'contacts': snapshot.contacts.map((contact) => contact.toJson()).toList(),
+      'contacts': snapshot.contacts
+          .map((contact) => {
+                ...contact.toJson(),
+                if (contact.continuity.definitions.isNotEmpty ||
+                    contact.continuity.revision != 0)
+                  'continuity': contact.continuity.toJson(),
+              })
+          .toList(),
       'messagesByContact': <String, dynamic>{
         for (final entry in snapshot.messagesByContact.entries)
           entry.key: entry.value.map((message) => message.toJson()).toList(),

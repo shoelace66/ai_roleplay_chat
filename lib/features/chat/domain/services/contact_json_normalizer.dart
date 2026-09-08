@@ -534,8 +534,8 @@ class ContactJsonNormalizer {
     final values = _values(json['values'], '$path.values');
     final definitions = json['definitions'];
     if (definitions != null && definitions is! List) {
-      _error(
-          '$path.definitions', '需要状态定义数组，例如 [{"id":"location","name":"地点"}]。');
+      _error('$path.definitions',
+          '需要状态定义数组，例如 [{"id":"location","label":"地点","type":"string"}]。');
     } else if (definitions is List) {
       final items = <Map<String, dynamic>>[];
       final ids = <String>{};
@@ -550,39 +550,68 @@ class ContactJsonNormalizer {
             definitions[i] as Map,
             const {
               'id': ['标识'],
-              'name': ['名称', '状态名称'],
+              'label': ['名称', '状态名称', 'name'],
+              'type': ['类型'],
+              'enum': ['选项', '可选值', '枚举'],
               'description': ['说明', '记录说明'],
-              'initialValue': ['初值', '初始值', 'defaultValue'],
+              'defaultValue': ['初值', '初始值', 'initialValue'],
               'updateRule': ['更新规则', 'rule'],
             },
             itemPath);
         for (final key in [
           'id',
-          'name',
+          'label',
           'description',
-          'initialValue',
+          'defaultValue',
           'updateRule'
         ]) {
           item[key] = _text(item[key], '$itemPath.$key');
         }
-        if (item['id'] == '' && item['name'] != '') {
-          item['id'] = item['name'];
+        item['type'] ??= 'string';
+        if (item['type'] != 'string') {
+          _error('$itemPath.type',
+              '当前仅支持 "string"，实际是 ${jsonEncode(item['type'])}；默认值和当前值请使用文本。');
+        }
+        final options = item['enum'];
+        if (options != null && options is! List) {
+          _error('$itemPath.enum',
+              '需要文本数组，例如 ["清晨", "下午", "深夜"]，实际是 ${jsonEncode(options)}。');
+        } else if (options is List) {
+          final seen = <String>{};
+          for (var j = 0; j < options.length; j++) {
+            final option = options[j];
+            if (option is! String || option.trim().isEmpty) {
+              _error(
+                  '$itemPath.enum[$j]', '选项必须是非空文本，实际是 ${jsonEncode(option)}。');
+            } else if (!seen.add(option)) {
+              _error('$itemPath.enum[$j]', '选项 ${jsonEncode(option)} 重复。');
+            }
+          }
+          if (options.isNotEmpty &&
+              item['defaultValue'] != '' &&
+              !options.contains(item['defaultValue'])) {
+            _error('$itemPath.defaultValue',
+                '实际值 ${jsonEncode(item['defaultValue'])} 不在 enum 中；可选值：${jsonEncode(options)}。');
+          }
+        }
+        if (item['id'] == '' && item['label'] != '') {
+          item['id'] = item['label'];
           _note('$itemPath.id', '未提供 ID，已使用名称作为 ID。');
         }
-        if (item['name'] == '') _error('$itemPath.name', '状态名称不能为空。');
+        if (item['label'] == '') _error('$itemPath.label', '状态名称不能为空。');
         if (item['id'] == '') _error('$itemPath.id', '状态 ID 不能为空。');
         if (!ids.add(item['id'] as String)) {
           _error('$itemPath.id', '状态 ID “${item['id']}”重复。');
         }
-        if (!names.add(item['name'] as String)) {
-          _error('$itemPath.name', '状态名称“${item['name']}”重复。');
+        if (!names.add(item['label'] as String)) {
+          _error('$itemPath.label', '状态名称“${item['label']}”重复。');
         }
         items.add(item);
       }
       // Exact display-name mapping is allowed; never fuzzy-match state values/IDs.
       for (final key in values.keys.toList()) {
         if (ids.contains(key)) continue;
-        final matches = items.where((item) => item['name'] == key).toList();
+        final matches = items.where((item) => item['label'] == key).toList();
         if (matches.length == 1) {
           final id = matches.single['id'] as String;
           if (values.containsKey(id) && values[id] != values[key]) {
@@ -595,6 +624,18 @@ class ContactJsonNormalizer {
         } else {
           _error('$path.values.$key',
               '没有对应的状态定义，请在 definitions 中添加该 ID 或修正当前值的键名。');
+        }
+      }
+      for (final item in items) {
+        final id = item['id'] as String;
+        final options = item['enum'];
+        if (options is List &&
+            options.isNotEmpty &&
+            values.containsKey(id) &&
+            values[id] != '' &&
+            !options.contains(values[id])) {
+          _error('$path.values.$id',
+              '实际值 ${jsonEncode(values[id])} 不在 enum 中；可选值：${jsonEncode(options)}。');
         }
       }
       json['definitions'] = items;

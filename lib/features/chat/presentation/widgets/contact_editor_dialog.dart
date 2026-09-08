@@ -1,4 +1,5 @@
 import '../../data/models/continuity_state.dart';
+import '../../data/models/contact_json_example.dart';
 import 'story_state_editor.dart';
 import 'contact_avatar.dart';
 import '../../../../core/utils/avatar_image.dart';
@@ -383,20 +384,7 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
 
   Widget _buildJsonForm() {
     if (_jsonCtrl.text.isEmpty) {
-      _jsonCtrl.text = '''{
-  "name": "角色名称",
-  "avatar": "★",
-  "fixedInput": "你是...",
-  "personality": ["理性", "克制"],
-  "appearance": ["短发", "黑色风衣"],
-  "backgroundStory": ["成长经历", "核心信念"],
-  "continuity": {
-    "schemaVersion": 2,
-    "revision": 0,
-    "definitions": [],
-    "values": {}
-  }
-}''';
+      _jsonCtrl.text = contactJsonExample;
     }
     return SingleChildScrollView(
       child: Column(
@@ -419,6 +407,13 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
           const Text(
             '支持中英文字段名、常见拼写差异、代码块、注释和尾随逗号；创建前会显示兼容调整及具体错误，原文可继续修改。',
             style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            '状态定义使用 id / label / type / description / defaultValue，可选 enum 和 updateRule。'
+            'values 按 id 保存当前值，省略某项时使用默认值。type 当前支持 string；'
+            'enum 限制非空值，空字符串表示明确清空。旧 name / initialValue 仍可导入。',
+            style: TextStyle(fontSize: 12),
           ),
           Align(
             alignment: Alignment.centerLeft,

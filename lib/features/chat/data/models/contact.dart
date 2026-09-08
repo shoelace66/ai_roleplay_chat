@@ -731,7 +731,7 @@ class Contact {
     if (fixedInput.isNotEmpty) json['fixedInput'] = fixedInput;
     if (currentStates.isNotEmpty) json['currentStates'] = currentStates;
     if (continuity.definitions.isNotEmpty || continuity.revision != 0) {
-      json['continuity'] = continuity.toJson();
+      json['continuity'] = continuity.toStorageJson();
     }
     if (personality.isNotEmpty) json['personality'] = personality;
     if (appearance.isNotEmpty) json['appearance'] = appearance;

@@ -5,37 +5,75 @@ class StateDefinition {
       required this.name,
       this.description = '',
       this.initialValue = '',
+      this.type = 'string',
+      this.enumValues = const [],
       this.updateRule = ''});
   final String id;
   final String name;
   final String description;
   final String initialValue;
+  final String type;
+  final List<String> enumValues;
   final String updateRule;
 
+  // Explicit clearing remains supported; nonempty values obey the enum.
+  bool accepts(String value) =>
+      value.isEmpty || enumValues.isEmpty || enumValues.contains(value);
+
   Map<String, dynamic> toJson() => {
+        'id': id,
+        'label': name,
+        'type': type,
+        if (enumValues.isNotEmpty) 'enum': enumValues,
+        'description': description,
+        'defaultValue': initialValue,
+        'updateRule': updateRule
+      };
+
+  // Old reversible journals compare these keys exactly; preserve their shape.
+  Map<String, dynamic> toStorageJson() => {
         'id': id,
         'name': name,
         'description': description,
         'initialValue': initialValue,
-        'updateRule': updateRule
+        'updateRule': updateRule,
+        if (enumValues.isNotEmpty) 'enum': enumValues,
       };
   factory StateDefinition.fromJson(Map json) {
     for (final key in [
       'id',
       'name',
+      'label',
+      'type',
       'description',
       'initialValue',
+      'defaultValue',
       'updateRule'
     ]) {
       if (json[key] != null && json[key] is! String) {
         throw const FormatException('状态定义必须使用文本');
       }
     }
+    for (final pair in [('label', 'name'), ('defaultValue', 'initialValue')]) {
+      if (json[pair.$1] != null &&
+          json[pair.$2] != null &&
+          json[pair.$1] != json[pair.$2]) {
+        throw FormatException('${pair.$1} 与旧字段 ${pair.$2} 的内容冲突');
+      }
+    }
+    final options = json['enum'];
+    if (options != null &&
+        (options is! List || options.any((v) => v is! String))) {
+      throw const FormatException('enum 必须是文本数组');
+    }
     return StateDefinition(
         id: json['id'] as String? ?? '',
-        name: json['name'] as String? ?? '',
+        name: (json['label'] ?? json['name']) as String? ?? '',
+        type: json['type'] as String? ?? 'string',
+        enumValues: List<String>.unmodifiable(options as List? ?? const []),
         description: json['description'] as String? ?? '',
-        initialValue: json['initialValue'] as String? ?? '',
+        initialValue:
+            (json['defaultValue'] ?? json['initialValue']) as String? ?? '',
         updateRule: json['updateRule'] as String? ?? '');
   }
 }
@@ -64,6 +102,20 @@ class ContinuityState {
           !ids.add(definition.id) ||
           !names.add(definition.name.trim())) {
         throw const FormatException('状态名称和 ID 不能为空或重复');
+      }
+      if (definition.type != 'string') {
+        throw FormatException('状态 ${definition.id} 的 type 仅支持 string');
+      }
+      if (definition.enumValues.any((v) => v.trim().isEmpty) ||
+          definition.enumValues.toSet().length !=
+              definition.enumValues.length) {
+        throw FormatException('状态 ${definition.id} 的 enum 选项不能为空或重复');
+      }
+      if (!definition.accepts(definition.initialValue) ||
+          !definition
+              .accepts(values[definition.id] ?? definition.initialValue)) {
+        throw FormatException(
+            '状态 ${definition.id} 的默认值或当前值必须属于 enum：${definition.enumValues.join('、')}');
       }
     }
     if (revision < 0 || values.keys.any((key) => !ids.contains(key))) {
@@ -128,5 +180,9 @@ class ContinuityState {
         'values': {
           for (final d in definitions) d.id: values[d.id] ?? d.initialValue
         }
+      };
+  Map<String, dynamic> toStorageJson() => {
+        ...toJson(),
+        'definitions': definitions.map((d) => d.toStorageJson()).toList(),
       };
 }

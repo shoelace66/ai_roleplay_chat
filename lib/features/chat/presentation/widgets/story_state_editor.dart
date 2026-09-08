@@ -87,6 +87,8 @@ class _DefinitionDialogState extends State<_DefinitionDialog> {
       TextEditingController(text: widget.definition?.initialValue ?? '');
   late final rule =
       TextEditingController(text: widget.definition?.updateRule ?? '');
+  late final options = TextEditingController(
+      text: widget.definition?.enumValues.join('\n') ?? '');
   late final current = TextEditingController(
       text: widget.definition == null
           ? ''
@@ -95,7 +97,14 @@ class _DefinitionDialogState extends State<_DefinitionDialog> {
   String? error;
   @override
   void dispose() {
-    for (final controller in [name, description, initial, rule, current]) {
+    for (final controller in [
+      name,
+      description,
+      initial,
+      rule,
+      current,
+      options
+    ]) {
       controller.dispose();
     }
     super.dispose();
@@ -116,18 +125,26 @@ class _DefinitionDialogState extends State<_DefinitionDialog> {
         id: id,
         name: name.text.trim(),
         description: description.text,
+        type: widget.definition?.type ?? 'string',
+        enumValues: List.unmodifiable(options.text
+            .split('\n')
+            .map((v) => v.trim())
+            .where((v) => v.isNotEmpty)),
         initialValue: initial.text,
         updateRule: rule.text);
-    Navigator.pop(
-        context,
-        ContinuityState(revision: value.revision, definitions: [
-          for (final d in value.definitions)
-            if (d.id == id) next else d,
-          if (definition == null) next
-        ], values: {
-          ...value.values,
-          id: definition == null ? initial.text : current.text
-        }));
+    try {
+      final updated = ContinuityState(revision: value.revision, definitions: [
+        for (final d in value.definitions)
+          if (d.id == id) next else d,
+        if (definition == null) next
+      ], values: {
+        ...value.values,
+        id: definition == null ? initial.text : current.text
+      });
+      Navigator.pop(context, updated);
+    } on FormatException catch (e) {
+      setState(() => error = e.message);
+    }
   }
 
   @override
@@ -152,6 +169,15 @@ class _DefinitionDialogState extends State<_DefinitionDialog> {
                   minLines: 1,
                   maxLines: 4,
                   decoration: const InputDecoration(labelText: '初值（可留空）')),
+              TextField(
+                  controller: options,
+                  minLines: 2,
+                  maxLines: 8,
+                  decoration: const InputDecoration(
+                      labelText: '可选值 enum（可留空）',
+                      hintText: '每行一个，例如：\n清晨\n下午\n深夜',
+                      helperText: '类型为 string；不填可自由记录，填写后非空值须选自列表。',
+                      helperMaxLines: 3)),
               TextField(
                   controller: rule,
                   minLines: 2,

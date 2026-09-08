@@ -12,7 +12,7 @@
 
 ## 状态协议
 
-`Contact.continuity` 保存 `revision`、按显示顺序排列的 `definitions` 和以 ID 为键的 `values`。每个定义包括 `id / name / description / initialValue / updateRule`。定义进入稳定 system 前缀，完整当前值进入本轮动态上下文，不参与摘要或通用列表/行长裁剪。
+`Contact.continuity` 保存 `revision`、按显示顺序排列的 `definitions` 和以 ID 为键的 `values`。对外 JSON 定义使用 `id / label / type / description / defaultValue`，可选 `enum / updateRule`；兼容旧 `name / initialValue`。定义进入稳定 system 前缀，完整当前值进入本轮动态上下文，不参与摘要或通用列表/行长裁剪。字段说明和完整示例见 [Continuity JSON](CONTINUITY_JSON.md)。内部持久化继续使用原名称键，避免破坏旧版逐字段比较的可逆剧情日志。
 
 `roleplay-memory-v5` 的 `memoryPatch.stateTransition` 示例：
 

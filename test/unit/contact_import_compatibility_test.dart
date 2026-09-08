@@ -145,7 +145,7 @@ void main() {
     }}''');
     expect(result.errorMessage, contains(r'$.continuity.revision'));
     expect(result.errorMessage, contains(r'$.continuity.definitions[1].id'));
-    expect(result.errorMessage, contains(r'$.continuity.definitions[1].name'));
+    expect(result.errorMessage, contains(r'$.continuity.definitions[1].label'));
     expect(result.errorMessage, contains(r'$.continuity.values.b'));
     expect(parser.parseDetailed('{"name":"A","continuity":[]}').errorMessage,
         contains(r'$.continuity'));
