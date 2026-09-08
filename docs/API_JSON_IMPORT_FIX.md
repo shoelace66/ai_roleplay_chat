@@ -1,6 +1,6 @@
 # API 输入与 JSON 创建修复（2026-09-08）
 
-安装包：[ai-roleplay-chat-v2.3.1-mobile-api-json-fix.apk](../releases/ai-roleplay-chat-v2.3.1-mobile-api-json-fix.apk)（57.6 MiB，版本 `2.3.1+8`）。本次构建输出和交付 APK 的 SHA-256 一致，详见同目录 `.sha256` 文件。
+历史安装包 `ai-roleplay-chat-v2.3.1-mobile-api-json-fix.apk`（57.6 MiB，版本 `2.3.1+8`）及其校验文件已清理。[下载当前版本](https://github.com/shoelace66/ai_roleplay_chat/releases/tag/v2.5.2)。以下保留该次修复记录。
 
 ## API 输入
 

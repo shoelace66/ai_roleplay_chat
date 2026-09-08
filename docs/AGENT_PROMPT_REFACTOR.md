@@ -43,6 +43,6 @@ PLAN/JUDGE 事件召回仍由协调器使用自己的小型输出限制，避免
 - `git diff --check`：通过。
 - `flutter build apk --release --no-pub`：构建 2.4.0+9 release APK，交付文件与构建输出 SHA-256 一致。
 
-验收包：[`ai-roleplay-chat-v2.4.0-agent-prompt.apk`](../releases/ai-roleplay-chat-v2.4.0-agent-prompt.apk)
+历史验收包 `ai-roleplay-chat-v2.4.0-agent-prompt.apk` 已清理：[下载当前版本](https://github.com/shoelace66/ai_roleplay_chat/releases/tag/v2.5.2)。
 
 SHA-256：`b03409bdfe5ee0a91967c0ec90e7b8b6fe33793b841886db4ac8bbf02213007d`

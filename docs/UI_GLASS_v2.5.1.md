@@ -18,4 +18,4 @@
 
 `58edf4d471dd1a3106c29d78b3057909b6da04658465a22bb5408314318f61a5`
 
-[安装包](https://github.com/shoelace66/ai_roleplay_chat/releases/download/v2.5.1/ai-roleplay-chat-v2.5.1-glass-ui.apk)
+历史安装包已清理：[下载当前版本](https://github.com/shoelace66/ai_roleplay_chat/releases/tag/v2.5.2)。

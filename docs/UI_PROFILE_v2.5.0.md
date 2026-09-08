@@ -30,6 +30,6 @@
 
 2026-09-08 验证：静态分析无问题，全量 361 项测试通过；最终资料页修改后又执行 4 项交互测试，全部通过。构建版本为 2.5.0+10。
 
-安装包：[ai-roleplay-chat-v2.5.0-ui-profile.apk](../releases/ai-roleplay-chat-v2.5.0-ui-profile.apk)，60,639,982 字节。APK 版本与 v2 签名已验证，沿用项目现有调试证书。交付文件与构建输出 SHA-256 一致：
+历史安装包 `ai-roleplay-chat-v2.5.0-ui-profile.apk`（60,639,982 字节）已清理：[下载当前版本](https://github.com/shoelace66/ai_roleplay_chat/releases/tag/v2.5.2)。当时 APK 版本与 v2 签名已验证，沿用项目现有调试证书。历史交付文件与构建输出 SHA-256 一致：
 
 `b0892bc53e68c714af30f47c0c1a75c1c31cc7f956789484f9daa1975b0f791a`

@@ -71,6 +71,6 @@ v5 将正文 JSON 字段排在 `memoryPatch` 前，使流式界面可以先显�
 
 验证包含真实 SQLite 事务故障注入，以及提交暂停时 UI 保持此前已提交状态。没有使用线上 API，也没有据此宣称真实模型已达到特定命中率。
 
-体验 APK：[`ai-roleplay-chat-story-state-preview.apk`](../releases/ai-roleplay-chat-story-state-preview.apk)，57.2 MiB，使用最终代码执行 `flutter build apk --release --no-pub` 构建。APK 签名验证通过，交付文件与构建输出 SHA-256 一致：
+历史体验 APK `ai-roleplay-chat-story-state-preview.apk`（57.2 MiB）已清理：[下载当前版本](https://github.com/shoelace66/ai_roleplay_chat/releases/tag/v2.5.2)。当时使用 `flutter build apk --release --no-pub` 构建，签名验证通过，历史交付文件与构建输出 SHA-256 一致：
 
 `21dcced8267264163ef676a8077ba1b0d40bbf8e042d7c7d3dea5ac77c7514a5`
