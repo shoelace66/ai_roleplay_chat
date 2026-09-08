@@ -40,7 +40,7 @@ class ContactSidebar extends StatelessWidget {
                         children: [
                           Text('对话',
                               style: theme.textTheme.headlineMedium
-                                  ?.copyWith(fontWeight: FontWeight.w800)),
+                                  ?.copyWith(fontWeight: FontWeight.w600)),
                           const SizedBox(height: 5),
                           Text('${contacts.length} 个角色与故事',
                               style: theme.textTheme.bodySmall?.copyWith(

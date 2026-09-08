@@ -299,13 +299,13 @@ flutter build apk --release
 
 ## 下载
 
-当前版本 **v2.5.1（构建号 11）**：
+当前版本 **v2.5.2（构建号 12）**：
 
-- [下载 Android APK](https://github.com/shoelace66/ai_roleplay_chat/releases/download/v2.5.1/ai-roleplay-chat-v2.5.1-glass-ui.apk)
-- [版本说明与附件](https://github.com/shoelace66/ai_roleplay_chat/releases/tag/v2.5.1)
-- [SHA-256 校验文件](releases/ai-roleplay-chat-v2.5.1-glass-ui.apk.sha256)
+- [下载 Android APK](https://github.com/shoelace66/ai_roleplay_chat/releases/download/v2.5.2/ai-roleplay-chat-v2.5.2-adaptive-ui.apk)
+- [版本说明与附件](https://github.com/shoelace66/ai_roleplay_chat/releases/tag/v2.5.2)
+- [SHA-256 校验文件](releases/ai-roleplay-chat-v2.5.2-adaptive-ui.apk.sha256)
 
-本版包含 Agent 式提示词、持久化剧情回滚、API 与 JSON 导入修复、照片头像和资料编辑，以及统一主题与局部毛玻璃。完整说明见 [v2.5.1 Release Notes](docs/RELEASE_NOTES_v2.5.1.md)。
+本版采用更克制的灰蓝配色与柔和毛玻璃，修复“使用自然语言创建”文字截断，创建窗口适配窄屏、横屏、大字体和键盘。保留 Agent 式提示词、持久化剧情回滚、API 与 JSON 导入修复、照片头像和资料编辑。完整说明见 [v2.5.2 Release Notes](docs/RELEASE_NOTES_v2.5.2.md)。
 
 > 从旧版本升级前，建议先在聊天页右上角打开“本地备份”，复制完整备份。新版本会自动把旧 SharedPreferences 联系人和消息迁移到 SQLite。
 

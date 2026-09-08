@@ -25,6 +25,8 @@ class ChatShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final appBar = AppBar(
+      toolbarHeight: 64 +
+          (MediaQuery.textScalerOf(context).scale(17) - 17).clamp(0, 40) * 2,
       titleSpacing: 0,
       title: Semantics(
         button: onEditProfile != null,
@@ -51,11 +53,14 @@ class ChatShell extends StatelessWidget {
                     Text(title,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontSize: 17, fontWeight: FontWeight.w700)),
+                            fontSize: 17, fontWeight: FontWeight.w600)),
                     if (onEditProfile != null)
                       Text('资料与状态',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                               fontSize: 11,
+                              fontWeight: FontWeight.w400,
                               color: Theme.of(context)
                                   .colorScheme
                                   .onSurfaceVariant)),

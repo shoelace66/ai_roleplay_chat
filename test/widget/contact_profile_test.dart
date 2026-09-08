@@ -97,8 +97,11 @@ void main() {
   tearDown(() => provider.dispose());
 
   Future<void> phone(WidgetTester tester,
-      {double width = 390, bool dark = false, double scale = 1}) async {
-    tester.view.physicalSize = Size(width, 844);
+      {double width = 390,
+      double height = 844,
+      bool dark = false,
+      double scale = 1}) async {
+    tester.view.physicalSize = Size(width, height);
     tester.view.devicePixelRatio = 1;
     tester.platformDispatcher.platformBrightnessTestValue =
         dark ? Brightness.dark : Brightness.light;
@@ -140,10 +143,55 @@ void main() {
           as RenderRepaintBoundary;
       final image = await boundary.toImage(pixelRatio: 2);
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
-      await Directory('reports/ui-v2.5.1').create(recursive: true);
-      await File('reports/ui-v2.5.1/$name.png')
+      await Directory('reports/ui-v2.5.2').create(recursive: true);
+      await File('reports/ui-v2.5.2/$name.png')
           .writeAsBytes(data!.buffer.asUint8List());
       image.dispose();
+    });
+  }
+
+  for (final size in [
+    const Size(320, 568),
+    const Size(412, 915),
+    const Size(640, 360),
+    const Size(844, 390)
+  ]) {
+    testWidgets('聊天适配 $size 和大字体键盘', (tester) async {
+      await phone(tester, width: size.width, height: size.height, scale: 1.3);
+      expect(tester.takeException(), isNull);
+      await capture(
+          tester, 'chat-${size.width.toInt()}x${size.height.toInt()}');
+      tester.view.viewInsets =
+          FakeViewPadding(bottom: size.height < 500 ? 120 : 240);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.enterText(
+          find.byKey(const ValueKey('message-composer-input')),
+          '第一行\n第二行\n第三行\n第四行\n第五行\n第六行');
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final action =
+          tester.getRect(find.byKey(const ValueKey('message-composer-action')));
+      expect(action.bottom,
+          lessThanOrEqualTo(size.height - tester.view.viewInsets.bottom));
+      FocusManager.instance.primaryFocus?.unfocus();
+      tester.view.resetViewInsets();
+      tester.view.padding = size.height < 500
+          ? const FakeViewPadding(left: 32, right: 32, bottom: 16)
+          : const FakeViewPadding(top: 24, bottom: 24);
+      addTearDown(tester.view.resetPadding);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('打开对象列表'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byType(ContactAvatar).last);
+      await tester.pumpAndSettle();
+      expect(find.text('角色资料'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      for (final tab in ['状态', '记忆']) {
+        await tester.tap(find.text(tab));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }
     });
   }
 

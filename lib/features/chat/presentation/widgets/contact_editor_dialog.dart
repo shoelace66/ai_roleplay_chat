@@ -88,33 +88,55 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final dialogWidth =
-        (MediaQuery.of(context).size.width - 32).clamp(520.0, 920.0);
-    final dialogHeight =
-        (MediaQuery.of(context).size.height - 48).clamp(460.0, 860.0);
-    return AlertDialog(
-      title: Text(_category == ContactCategory.story
-          ? '创建故事'
-          : _category == ContactCategory.assistant
-              ? '创建助手'
-              : '创建角色'),
-      content: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: dialogWidth,
-          maxHeight: dialogHeight,
+    return Dialog(
+      insetPadding: const EdgeInsets.all(12),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720, maxHeight: 820),
+        child: SizedBox(
+          width: 720,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _category == ContactCategory.story
+                        ? '创建故事'
+                        : _category == ContactCategory.assistant
+                            ? '创建助手'
+                            : '创建角色',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _buildContent(),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: OverflowBar(
+                  alignment: MainAxisAlignment.end,
+                  spacing: 8,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('取消'),
+                    ),
+                    FilledButton(
+                      onPressed: _pickingAvatar ? null : _onSave,
+                      child: const Text('创建'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-        child: _buildContent(),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: _pickingAvatar ? null : _onSave,
-          child: const Text('创建'),
-        ),
-      ],
     );
   }
 
@@ -161,8 +183,27 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
 
   Widget _buildSharedFields() {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final mode in _EditorMode.values)
+              ChoiceChip(
+                label: Text(switch (mode) {
+                  _EditorMode.normal => '表单创建',
+                  _EditorMode.json => '使用 JSON 创建',
+                  _EditorMode.naturalLanguage => '使用自然语言创建',
+                }),
+                selected: _mode == mode,
+                onSelected: (_) => setState(() => _mode = mode),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
         _buildTypeSelector(),
+        const SizedBox(height: 12),
         TextField(
           controller: _nameCtrl,
           decoration: InputDecoration(
@@ -335,21 +376,6 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
               value: _state,
               onChanged: (value) => setState(() => _state = value)),
           const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              TextButton(
-                onPressed: () => setState(() => _mode = _EditorMode.json),
-                child: const Text('使用 JSON 创建'),
-              ),
-              const SizedBox(width: 20),
-              TextButton(
-                onPressed: () =>
-                    setState(() => _mode = _EditorMode.naturalLanguage),
-                child: const Text('使用自然语言创建'),
-              ),
-            ],
-          ),
         ],
       ),
     );

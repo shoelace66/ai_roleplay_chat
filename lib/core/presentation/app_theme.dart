@@ -12,9 +12,22 @@ abstract final class AppTheme {
   static ThemeData build(Brightness brightness) {
     final dark = brightness == Brightness.dark;
     final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF5276D9),
+      seedColor: const Color(0xFF708A98),
       brightness: brightness,
-      surface: dark ? const Color(0xFF20232B) : Colors.white,
+      surface: dark ? const Color(0xFF2C3136) : const Color(0xFFFCFDFD),
+      primary: dark ? const Color(0xFFA5BDC8) : const Color(0xFF526F7D),
+      onPrimary: dark ? const Color(0xFF223039) : Colors.white,
+      primaryContainer:
+          dark ? const Color(0xFF37474F) : const Color(0xFFE7EEF1),
+      onPrimaryContainer:
+          dark ? const Color(0xFFD0DCE0) : const Color(0xFF415862),
+      secondaryContainer:
+          dark ? const Color(0xFF37474F) : const Color(0xFFE7EEF1),
+      onSecondaryContainer:
+          dark ? const Color(0xFFD0DCE0) : const Color(0xFF415862),
+      onSurface: dark ? const Color(0xFFDDE2E5) : const Color(0xFF39434A),
+      onSurfaceVariant:
+          dark ? const Color(0xFFAFBAC1) : const Color(0xFF64717A),
     );
     final shape =
         RoundedRectangleBorder(borderRadius: BorderRadius.circular(20));
@@ -27,13 +40,13 @@ abstract final class AppTheme {
       brightness: brightness,
       colorScheme: scheme,
       scaffoldBackgroundColor:
-          dark ? const Color(0xFF14171D) : const Color(0xFFF3F5F9),
+          dark ? const Color(0xFF252A2F) : const Color(0xFFF4F6F6),
       fontFamilyFallback: fontFallback,
       splashFactory: InkSparkle.splashFactory,
       visualDensity: VisualDensity.standard,
       appBarTheme: AppBarTheme(
         backgroundColor:
-            dark ? const Color(0xFF14171D) : const Color(0xFFF3F5F9),
+            dark ? const Color(0xFF252A2F) : const Color(0xFFF4F6F6),
         foregroundColor: scheme.onSurface,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -43,7 +56,7 @@ abstract final class AppTheme {
             fontFamilyFallback: fontFallback,
             color: scheme.onSurface,
             fontSize: 20,
-            fontWeight: FontWeight.w700),
+            fontWeight: FontWeight.w600),
         systemOverlayStyle:
             dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       ),
@@ -55,7 +68,7 @@ abstract final class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: dark ? const Color(0xFF2A2E38) : const Color(0xFFF1F3F8),
+        fillColor: dark ? const Color(0xFF333A40) : const Color(0xFFF0F3F4),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         border: border,
@@ -69,6 +82,8 @@ abstract final class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
+        backgroundColor: scheme.primaryContainer,
+        foregroundColor: scheme.onPrimaryContainer,
         minimumSize: const Size(48, 48),
         shape: const StadiumBorder(),
         textStyle: const TextStyle(

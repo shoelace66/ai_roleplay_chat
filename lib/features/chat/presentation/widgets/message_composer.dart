@@ -24,6 +24,8 @@ class MessageComposer extends StatelessWidget {
     final theme = Theme.of(context);
     final action = isGenerating ? onCancel : onSend;
     final actionEnabled = enabled && (!isGenerating || canCancel);
+    final availableHeight = MediaQuery.sizeOf(context).height -
+        MediaQuery.viewInsetsOf(context).bottom;
     return SafeArea(
       top: false,
       child: Padding(
@@ -39,7 +41,11 @@ class MessageComposer extends StatelessWidget {
                     controller: controller,
                     enabled: enabled && !isGenerating,
                     minLines: 1,
-                    maxLines: 6,
+                    maxLines: availableHeight < 300
+                        ? 1
+                        : availableHeight < 500
+                            ? 3
+                            : 6,
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) {
                       if (enabled && !isGenerating) onSend();
@@ -73,8 +79,11 @@ class MessageComposer extends StatelessWidget {
                         borderRadius: BorderRadius.circular(24),
                       ),
                       backgroundColor: isGenerating
-                          ? theme.colorScheme.error
-                          : theme.colorScheme.primary,
+                          ? theme.colorScheme.errorContainer
+                          : theme.colorScheme.primaryContainer,
+                      foregroundColor: isGenerating
+                          ? theme.colorScheme.onErrorContainer
+                          : theme.colorScheme.onPrimaryContainer,
                     ),
                     icon: AnimatedSwitcher(
                       duration: MediaQuery.disableAnimationsOf(context)

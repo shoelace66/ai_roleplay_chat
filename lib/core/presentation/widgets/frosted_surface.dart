@@ -14,7 +14,7 @@ class FrostedSurface extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(radius),
@@ -22,12 +22,12 @@ class FrostedSurface extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                theme.colorScheme.surface.withValues(alpha: dark ? .84 : .80),
-                theme.colorScheme.surface.withValues(alpha: dark ? .66 : .60),
+                theme.colorScheme.surface.withValues(alpha: dark ? .90 : .85),
+                theme.colorScheme.surface.withValues(alpha: dark ? .80 : .72),
               ],
             ),
             border: Border.all(
-                color: Colors.white.withValues(alpha: dark ? .12 : .72)),
+                color: Colors.white.withValues(alpha: dark ? .06 : .36)),
           ),
           child: Material(type: MaterialType.transparency, child: child),
         ),
@@ -52,8 +52,8 @@ class AmbientBackdrop extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: dark
-              ? const [Color(0xFF202A40), Color(0xFF151922), Color(0xFF222539)]
-              : const [Color(0xFFE2EAFB), Color(0xFFF4F6FA), Color(0xFFEAE4F5)],
+              ? const [Color(0xFF252A30), Color(0xFF262B2F), Color(0xFF282D31)]
+              : const [Color(0xFFF0F4F5), Color(0xFFF7F8F8), Color(0xFFF2F5F4)],
           stops: const [0, .52, 1],
         ),
       ),
