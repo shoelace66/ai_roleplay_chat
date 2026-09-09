@@ -18,7 +18,8 @@ void main() {
       expect(result.systemPrompt, isNot(contains('门已经推开一道缝')));
       expect(result.systemPrompt, isNot(contains('继续推门')));
       expect(result.userPrompt, contains('门已经推开一道缝'));
-      expect(result.userPrompt, endsWith('继续推门'));
+      expect(result.userPrompt, contains('【用户输入】\n继续推门'));
+      expect(result.userPrompt, contains('【本轮输出要求】返回完整 JSON 对象'));
     });
 
     test('fixedInput 不再遮蔽结构化角色字段，世界书时间线进入稳定资料', () {

@@ -97,7 +97,10 @@ class ProviderPreset {
         'doubao-1-5-lite-32k-250115',
         'doubao-pro-32k',
         'doubao-lite-32k',
+        'doubao-seed-2-0-mini-260428',
       ],
+      notes:
+          '默认使用 /chat/completions；如需 Responses API，请将 Base URL 填为完整的 /responses 地址',
     ),
     ProviderPreset(
       id: 'ollama',

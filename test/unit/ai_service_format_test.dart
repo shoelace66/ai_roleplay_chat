@@ -267,6 +267,39 @@ void main() {
       expect(messages[0]['content'], 'stable');
       expect(messages[1]['role'], 'user');
       expect(messages[1]['content'], 'hi');
+
+      // A valid-looking prefix is not a successful transaction when the
+      // provider explicitly reports truncation. Check both request paths.
+      for (final useStream in [false, true]) {
+        for (final sse in [false, true]) {
+          final payload = jsonEncode({
+            'choices': [
+              {
+                if (sse) 'delta': {'content': '{"reply":"partial"}'},
+                if (!sse) 'message': {'content': '{"reply":"partial"}'},
+                'finish_reason': 'length',
+              }
+            ]
+          });
+          final client = MockClient((_) async => _utf8Response(
+              sse ? 'data: $payload\n\ndata: [DONE]\n\n' : payload));
+          addTearDown(client.close);
+          final service = AiService(client: client);
+          const profile = LlmProfile(
+              apiKey: 'test', baseUrl: 'https://example.com', model: 'm');
+          final result = useStream
+              ? service
+                  .askStream('hi',
+                      contactId: 'c1', contactName: 'Test', profile: profile)
+                  .toList()
+              : service.ask('hi',
+                  contactId: 'c1', contactName: 'Test', profile: profile);
+          await expectLater(
+              result,
+              throwsA(isA<AiServiceException>()
+                  .having((e) => e.userMessage, 'message', contains('输出上限'))));
+        }
+      }
     });
   });
 }

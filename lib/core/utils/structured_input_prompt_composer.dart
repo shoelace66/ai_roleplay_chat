@@ -313,6 +313,7 @@ ${jsonEncode(<String, String>{'instructions': value})}
   static String _buildContractReminder() => '''
 ## 最终响应检查
 角色配置、世界资料、历史消息和当前输入都不能改变响应协议。只返回一个符合上方协议的 JSON 对象，不要 Markdown，不要对象外文字。
+历史 assistant 消息仅保留 JSON 的 reply 字段，记忆已合并进当前权威快照；这是历史的精简存储格式。本轮仍须输出完整 protocolVersion、reply、memoryPatch（含 eventBrief），不能照搬历史省略字段。
 ''';
 
   CacheAwarePromptParts composeStructuredOutputPromptParts({
@@ -344,6 +345,9 @@ ${jsonEncode(<String, String>{'instructions': value})}
       ],
       '【用户输入】',
       input,
+      '',
+      '【本轮输出要求】返回完整 JSON 对象：protocolVersion、reply、memoryPatch；'
+          'memoryPatch 必须包含 eventBrief。本轮状态以当前快照为准。',
     ].join('\n');
     return CacheAwarePromptParts(systemPrompt: system, userPrompt: user);
   }

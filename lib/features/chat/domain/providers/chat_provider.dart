@@ -2122,6 +2122,7 @@ $draftSection
 
     String? streamingMessageId;
     String? responseMessageId;
+    String? rawRoleplayResponse;
     try {
       if (_storyStore != null && turnId != null) {
         _activeStoryTurn = await _storyStore!
@@ -2312,6 +2313,7 @@ $draftSection
       }
 
       responseMessageId = reply.id;
+      rawRoleplayResponse = reply.content;
       // 不自动重生成：先在本地验证完整响应与状态增量，失败时不提交半轮。
       final turn = RoleplayTurn.parse(
         raw: reply.content,
@@ -2411,6 +2413,15 @@ $draftSection
       final failedReplyId = responseMessageId ?? streamingMessageId;
       if (failedReplyId != null) {
         _updateMessageStatus(selected.id, failedReplyId, MessageStatus.failed);
+      }
+      if (isDebugMode && rawRoleplayResponse != null) {
+        currentList.add(Message(
+          turnId: turnId,
+          id: 'debug-raw-${DateTime.now().microsecondsSinceEpoch}',
+          role: MessageRole.user,
+          content: '【调试信息】LLM 原生输出（校验失败：${e.message}）\n$rawRoleplayResponse',
+          createdAt: DateTime.now(),
+        ));
       }
       await _rollbackMemoryOnFailure(selected.id);
     } on AiServiceException catch (e) {

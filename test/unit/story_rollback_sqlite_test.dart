@@ -678,7 +678,8 @@ class _Model extends AiService {
       List<AiChatMessage> history = const <AiChatMessage>[],
       bool requireJsonObject = false,
       LlmProfile? profile,
-      RecallRequestBudget? requestBudget}) async {
+      RecallRequestBudget? requestBudget,
+      List<String> imageUrls = const <String>[]}) async {
     if (systemPrompt == null || systemPrompt.isEmpty) {
       return '{"keywords":[],"theme":[]}';
     }
@@ -694,7 +695,8 @@ class _Model extends AiService {
       String? systemPrompt,
       List<AiChatMessage> history = const <AiChatMessage>[],
       bool requireJsonObject = false,
-      LlmProfile? profile}) {
+      LlmProfile? profile,
+      List<String> imageUrls = const <String>[]}) {
     prompts.add(prompt);
     systems.add(systemPrompt ?? '');
     streamStarted.complete();

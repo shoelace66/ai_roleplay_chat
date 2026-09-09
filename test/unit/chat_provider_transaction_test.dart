@@ -7,9 +7,12 @@ import 'package:flutter_chat_demo/features/chat/data/models/message.dart';
 import 'package:flutter_chat_demo/features/chat/data/repositories/chat_repository.dart';
 import 'package:flutter_chat_demo/features/chat/application/chat_view_state.dart';
 import 'package:flutter_chat_demo/features/chat/domain/providers/chat_provider.dart';
+import 'package:flutter_chat_demo/features/chat/domain/services/roleplay_turn.dart';
 import 'package:flutter_chat_demo/features/chat/domain/repositories/chat_persistence.dart';
 import 'package:flutter_chat_demo/infrastructure/services/ai_service.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -166,6 +169,43 @@ void main() {
     expect(provider.messages.last.status, MessageStatus.failed);
     expect(provider.selectedContact!.eventGraph.turnCount, 1);
     expect(aiService.requestedModels, hasLength(2));
+    for (final (raw, detail) in <(String, String)>[
+      ('   ', '空白内容'),
+      ('她点了点头。', 'U+5979'),
+      ('{"reply":"你好"', '文本末尾'),
+      ('{\n"reply"："你好"}', 'U+FF1A'),
+      ('[]', '顶层应为 JSON 对象'),
+      ('{"reply":123}', r'$.reply'),
+      ('{"reply":" "}', r'$.reply'),
+      ('{"reply":"好","memoryPatch":[]}', r'$.memoryPatch'),
+      ('{"reply":"好","protocolVersion":"unknown"}', r'$.protocolVersion'),
+      (
+        '{"reply":"好","protocolVersion":"roleplay-memory-v5"}',
+        r'$.memoryPatch.eventBrief.description'
+      ),
+    ]) {
+      expect(
+          () => RoleplayTurn.parse(
+              raw: raw,
+              contact: _contact(),
+              userInput: '继续',
+              initialContext: ''),
+          throwsA(isA<FormatException>()
+              .having((e) => e.message, 'reason', contains(detail))
+              .having((e) => e.source, 'original response', raw)));
+    }
+    provider.toggleDebugMode();
+    aiService.mainResponse = '她点了点头。';
+    await provider.sendMessage('再继续');
+    expect(provider.error, contains('U+5979'));
+    expect(
+        provider.messages
+            .where((m) => m.id.startsWith('debug-raw-'))
+            .last
+            .content,
+        contains('她点了点头。'));
+    expect(provider.selectedContact!.eventGraph.turnCount, 1);
+    expect(aiService.requestedModels, hasLength(3));
   });
 
   test('旧值不符整轮拒绝，不写入正文或任何部分记忆', () async {
@@ -213,7 +253,102 @@ void main() {
     expect(aiService.userPrompts.last, contains('白衬衫'));
     expect(aiService.userPrompts.last, isNot(contains('我记住了。')));
     expect(aiService.histories.last.last.role, 'assistant');
-    expect(aiService.histories.last.last.content, '我记住了。');
+    expect(
+        jsonDecode(aiService.histories.last.last.content), {'reply': '我记住了。'});
+
+    // Exercise the actual Provider -> Repository -> HTTP -> parser -> storage
+    // path. The second request is made after reopening persisted messages.
+    for (final streaming in [false, true]) {
+      for (final responseShape in ['openai', 'sse', 'direct']) {
+        var calls = 0;
+        String? firstSystem;
+        final client = MockClient((request) async {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          final messages = body['messages'] as List;
+          if (messages.first['role'] != 'system') {
+            return http.Response('{"keywords":[],"theme":[]}', 200);
+          }
+          calls++;
+          expect(body['stream'], streaming);
+          final system = messages.first['content'] as String;
+          firstSystem ??= system;
+          expect(system, firstSystem);
+          if (calls == 2) {
+            expect(messages.map((m) => m['role']).toList(),
+                ['system', 'user', 'assistant', 'user']);
+            expect(jsonDecode(messages[2]['content'] as String),
+                {'reply': '她走进车站。'});
+            expect(messages.last['content'], contains('"revision":1'));
+            expect(messages.last['content'], contains('车站'));
+          }
+          final reply = jsonEncode({
+            'protocolVersion': 'roleplay-memory-v5',
+            'reply': calls == 1 ? '她走进车站。' : '她来到河岸。',
+            'memoryPatch': {
+              'eventBrief': {'description': calls == 1 ? '抵达车站' : '走到河岸'},
+              'stateTransition': {
+                'baseRevision': calls - 1,
+                'changes': [
+                  _change('scene/location', calls == 1 ? '' : '车站',
+                      calls == 1 ? '车站' : '河岸')
+                ],
+              },
+            },
+          });
+          final wire = switch (responseShape) {
+            'direct' => reply,
+            'sse' => '${[
+                reply.substring(0, 31),
+                reply.substring(31)
+              ].map((part) => 'data: ${jsonEncode({
+                            'choices': [
+                              {
+                                'delta': {'content': part}
+                              }
+                            ]
+                          })}\n\n').join()}'
+                  'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+                  'data: [DONE]\n\n',
+            _ => jsonEncode({
+                'choices': [
+                  {
+                    'message': {'content': reply},
+                    'finish_reason': 'stop'
+                  }
+                ]
+              }),
+          };
+          return http.Response.bytes(utf8.encode(wire), 200, headers: {
+            'content-type': responseShape == 'sse'
+                ? 'text/event-stream; charset=utf-8'
+                : 'application/json; charset=utf-8',
+          });
+        });
+        addTearDown(client.close);
+        provider.dispose();
+        persistence = _MemoryPersistence(ChatSnapshot(contacts: [_contact()]));
+        for (var round = 0; round < 2; round++) {
+          provider = ChatProvider(
+              persistence: persistence,
+              repository: ChatRepository(aiService: AiService(client: client)));
+          await provider.initialize();
+          await provider.saveProviderSettings(ProviderSettings(
+              llm: LlmProfile(
+                  apiKey: 'test-key',
+                  parameters: LlmParameters(stream: streaming))));
+          await provider.sendMessage(round == 0 ? '走进车站' : '走到河岸');
+          expect(provider.error, isNull,
+              reason: '$streaming/$responseShape round ${round + 1}');
+          expect(provider.selectedContact!.continuity.revision, round + 1);
+          expect(provider.selectedContact!.continuity.values['scene/location'],
+              round == 0 ? '车站' : '河岸');
+          expect(persistence.snapshot.messagesByContact['role-1'],
+              hasLength((round + 1) * 2));
+          if (round == 0) provider.dispose();
+        }
+        expect(calls, 2);
+      }
+    }
   });
 
   test('流式JSON中断不能把已显示草稿标为成功或写入状态', () async {
@@ -285,6 +420,7 @@ class _FakeAiService extends AiService {
     bool requireJsonObject = false,
     LlmProfile? profile,
     RecallRequestBudget? requestBudget,
+    List<String> imageUrls = const <String>[],
   }) async {
     if (prompt.contains('提取本轮对话中的关键词')) {
       return '{"keywords":["车票"],"theme":[]}';
@@ -312,6 +448,7 @@ class _FakeAiService extends AiService {
     List<AiChatMessage> history = const <AiChatMessage>[],
     bool requireJsonObject = false,
     LlmProfile? profile,
+    List<String> imageUrls = const <String>[],
   }) {
     histories.add(List<AiChatMessage>.from(history));
     final stream = pendingStream;

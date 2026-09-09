@@ -83,6 +83,7 @@ class AiService {
     bool requireJsonObject = false,
     LlmProfile? profile,
     RecallRequestBudget? requestBudget,
+    List<String> imageUrls = const <String>[],
   }) async {
     final effectiveProfile = profile ?? _runtimeProfile();
 
@@ -99,6 +100,7 @@ class AiService {
         profile: effectiveProfile,
         client: _client,
         requestBudget: requestBudget,
+        imageUrls: imageUrls,
       );
     } on TimeoutException catch (e) {
       throw AiServiceException('请求超时，请检查网络后重试。', cause: e);
@@ -123,6 +125,7 @@ class AiService {
     List<AiChatMessage> history = const <AiChatMessage>[],
     bool requireJsonObject = false,
     LlmProfile? profile,
+    List<String> imageUrls = const <String>[],
   }) async* {
     final effectiveProfile = profile ?? _runtimeProfile();
     if (!effectiveProfile.hasApiKey) {
@@ -136,6 +139,7 @@ class AiService {
         requireJsonObject: requireJsonObject,
         profile: effectiveProfile,
         client: _client,
+        imageUrls: imageUrls,
       );
     } on TimeoutException catch (error) {
       throw AiServiceException('请求超时，请检查网络后重试。', cause: error);
@@ -166,8 +170,24 @@ class AiService {
     required LlmProfile profile,
     required http.Client client,
     RecallRequestBudget? requestBudget,
+    List<String> imageUrls = const <String>[],
   }) async {
     final cacheKey = _completionEndpointCacheKey(profile.baseUrl);
+    if (_isResponsesEndpoint(profile.baseUrl)) {
+      return _requestOnce(
+        prompt: prompt,
+        systemPrompt: systemPrompt,
+        history: history,
+        requireJsonObject: requireJsonObject,
+        url: profile.baseUrl.trim(),
+        profile: profile.copyWith(
+          parameters: profile.parameters.copyWith(stream: false),
+        ),
+        client: client,
+        requestBudget: requestBudget,
+        imageUrls: imageUrls,
+      );
+    }
     final urls = _completionEndpointCandidates(
       profile.baseUrl,
       cached: _completionEndpointByBaseUrl[cacheKey],
@@ -186,6 +206,7 @@ class AiService {
           profile: profile,
           client: client,
           requestBudget: requestBudget,
+          imageUrls: imageUrls,
         );
         _completionEndpointByBaseUrl[cacheKey] = url;
         return result;
@@ -210,7 +231,23 @@ class AiService {
     required bool requireJsonObject,
     required LlmProfile profile,
     required http.Client client,
+    List<String> imageUrls = const <String>[],
   }) async* {
+    if (_isResponsesEndpoint(profile.baseUrl)) {
+      yield await _requestOnce(
+        prompt: prompt,
+        systemPrompt: systemPrompt,
+        history: history,
+        requireJsonObject: requireJsonObject,
+        url: profile.baseUrl.trim(),
+        profile: profile.copyWith(
+          parameters: profile.parameters.copyWith(stream: false),
+        ),
+        client: client,
+        imageUrls: imageUrls,
+      );
+      return;
+    }
     final urls = <String>[
       '${profile.baseUrl}/chat/completions',
       '${profile.baseUrl.replaceAll(RegExp(r'/v1$'), '')}/v1/chat/completions',
@@ -327,6 +364,7 @@ class AiService {
       final choices = decoded['choices'];
       if (choices is List && choices.isNotEmpty && choices.first is Map) {
         final first = choices.first as Map;
+        _checkFinishReason(first['finish_reason'], data);
         final delta = first['delta'];
         if (delta is Map) {
           final content = delta['content'];
@@ -342,6 +380,8 @@ class AiService {
       if (message is Map && message['content'] is String) {
         return message['content'] as String;
       }
+    } on AiServiceException {
+      rethrow;
     } catch (_) {
       return null;
     }
@@ -357,28 +397,41 @@ class AiService {
     required LlmProfile profile,
     required http.Client client,
     RecallRequestBudget? requestBudget,
+    List<String> imageUrls = const <String>[],
   }) async {
     final uri = Uri.parse(url);
     final params = profile.parameters;
-    final payload = <String, dynamic>{
-      'model': profile.model,
-      'messages': _buildMessages(
-        prompt,
-        systemPrompt: systemPrompt,
-        history: history,
-      ),
-      'temperature': params.temperature,
-      'top_p': params.topP,
-      'frequency_penalty': params.frequencyPenalty,
-      'presence_penalty': params.presencePenalty,
-      'stream': params.stream,
-    };
-    if (requireJsonObject && params.useJsonResponseFormat) {
+    final responsesEndpoint = _isResponsesEndpoint(url);
+    final payload = responsesEndpoint
+        ? _buildResponsesPayload(
+            prompt,
+            systemPrompt: systemPrompt,
+            history: history,
+            profile: profile,
+            requireJsonObject: requireJsonObject,
+            imageUrls: imageUrls,
+          )
+        : <String, dynamic>{
+            'model': profile.model,
+            'messages': _buildMessages(
+              prompt,
+              systemPrompt: systemPrompt,
+              history: history,
+            ),
+            'temperature': params.temperature,
+            'top_p': params.topP,
+            'frequency_penalty': params.frequencyPenalty,
+            'presence_penalty': params.presencePenalty,
+            'stream': params.stream,
+          };
+    if (!responsesEndpoint &&
+        requireJsonObject &&
+        params.useJsonResponseFormat) {
       payload['response_format'] = const <String, String>{
         'type': 'json_object',
       };
     }
-    if (params.maxTokens > 0) {
+    if (!responsesEndpoint && params.maxTokens > 0) {
       payload['max_tokens'] = params.maxTokens;
     }
 
@@ -405,7 +458,9 @@ class AiService {
       throw AiServiceException(_mapHttpStatus(response.statusCode));
     }
 
-    final content = _extractContent(response.body);
+    final content = responsesEndpoint
+        ? _extractResponsesContent(response.body)
+        : _extractContent(response.body);
     if (content == null || content.trim().isEmpty) {
       throw AiServiceException(
         '模型返回内容格式异常，请重试。',
@@ -432,6 +487,102 @@ class AiService {
           },
       <String, String>{'role': 'user', 'content': prompt},
     ];
+  }
+
+  Map<String, dynamic> _buildResponsesPayload(
+    String prompt, {
+    String? systemPrompt,
+    required List<AiChatMessage> history,
+    required LlmProfile profile,
+    required bool requireJsonObject,
+    List<String> imageUrls = const <String>[],
+  }) {
+    final input = <Map<String, dynamic>>[];
+    if (systemPrompt?.trim().isNotEmpty == true) {
+      input.add(<String, dynamic>{
+        'role': 'system',
+        'content': <Map<String, String>>[
+          <String, String>{
+            'type': 'input_text',
+            'text': systemPrompt!.trim(),
+          },
+        ],
+      });
+    }
+    for (final message in history) {
+      if (!message.isSupportedRole || message.content.trim().isEmpty) continue;
+      input.add(<String, dynamic>{
+        'role': message.role,
+        'content': <Map<String, String>>[
+          <String, String>{
+            'type': 'input_text',
+            'text': message.content,
+          },
+        ],
+      });
+    }
+    final userContent = <Map<String, String>>[
+      ...imageUrls.where((url) => url.trim().isNotEmpty).map(
+            (url) => <String, String>{
+              'type': 'input_image',
+              'image_url': url.trim(),
+            },
+          ),
+      <String, String>{'type': 'input_text', 'text': prompt},
+    ];
+    input.add(<String, dynamic>{
+      'role': 'user',
+      'content': userContent,
+    });
+    return <String, dynamic>{
+      'model': profile.model,
+      'input': input,
+      'temperature': profile.parameters.temperature,
+      'max_output_tokens': profile.parameters.maxTokens,
+    };
+  }
+
+  bool _isResponsesEndpoint(String url) {
+    final path = Uri.tryParse(url.trim())?.path.toLowerCase() ?? '';
+    return path.endsWith('/responses');
+  }
+
+  String? _extractResponsesContent(String body) {
+    final decoded = jsonDecode(body);
+    if (decoded is! Map) return null;
+    final incomplete = decoded['incomplete_details'];
+    if (incomplete is Map && incomplete['reason'] == 'length') {
+      throw AiServiceException(
+        'Responses 回复因输出上限截断，尚未生成最终答案。请提高输出上限后重试。',
+        rawResponse: body,
+      );
+    }
+    if (decoded['status'] == 'incomplete') {
+      throw AiServiceException(
+        'Responses 返回未完成状态，本轮未提交答案。',
+        rawResponse: body,
+      );
+    }
+    final outputText = decoded['output_text'];
+    if (outputText is String && outputText.trim().isNotEmpty) {
+      return outputText;
+    }
+    final output = decoded['output'];
+    if (output is List) {
+      final text = StringBuffer();
+      for (final item in output) {
+        if (item is! Map) continue;
+        final content = item['content'];
+        if (content is! List) continue;
+        for (final part in content) {
+          if (part is Map && part['text'] is String) {
+            text.write(part['text']);
+          }
+        }
+      }
+      if (text.isNotEmpty) return text.toString();
+    }
+    return null;
   }
 
   String _completionEndpointCacheKey(String baseUrl) {
@@ -515,15 +666,16 @@ class AiService {
 
     if (decoded == null) return null;
 
-    // 标准 reply 字段（业务约定）
-    final reply = (decoded['reply'] ?? '').toString().trim();
-    if (reply.isNotEmpty) return reply;
+    // Some compatible endpoints return the business JSON directly. Preserve
+    // its envelope; extracting only reply discards the state transaction.
+    if (decoded.containsKey('reply')) return jsonEncode(decoded);
 
     // OpenAI chat/completions 标准 choices
     final choices = decoded['choices'];
     if (choices is List && choices.isNotEmpty) {
       final first = choices.first;
       if (first is Map) {
+        _checkFinishReason(first['finish_reason'], jsonText);
         final message = first['message'];
         if (message is Map) {
           final content = (message['content'] ?? '').toString().trim();
@@ -549,6 +701,19 @@ class AiService {
     // SSE 响应特征：以 `data:` 开头，或含 `\ndata: ` 续行
     if (body.startsWith('data:')) return true;
     return body.contains('\ndata:');
+  }
+
+  void _checkFinishReason(dynamic reason, String raw) {
+    if (reason == 'length') {
+      throw AiServiceException(
+        '回复达到输出上限而被截断，本轮未提交状态。请在 API 设置中提高输出上限，或缩短回复后重试。',
+        rawResponse: raw,
+      );
+    }
+    if (reason == 'content_filter') {
+      throw AiServiceException('供应商中止了回复（content_filter），本轮未提交状态。',
+          rawResponse: raw);
+    }
   }
 
   /// 把 SSE chunk 流重组为完整 JSON 字符串

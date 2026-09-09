@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../../../core/utils/roleplay_protocol.dart';
 import '../../../../core/data/models/app_settings.dart';
 import '../../../../core/data/models/provider_settings.dart';
@@ -22,6 +24,7 @@ class ChatRepository {
     List<Message> conversationHistory = const <Message>[],
     AppSettings? settings,
     LlmProfile? profile,
+    List<String> imageUrls = const <String>[],
   }) async {
     final composer = StructuredInputPromptComposer(
       settings: settings ?? const AppSettings(),
@@ -41,6 +44,7 @@ class ChatRepository {
       history: _toAiHistory(conversationHistory),
       requireJsonObject: true,
       profile: profile,
+      imageUrls: imageUrls,
     );
 
     final assistantMessage = Message(
@@ -61,6 +65,7 @@ class ChatRepository {
     List<Message> conversationHistory = const <Message>[],
     AppSettings? settings,
     LlmProfile? profile,
+    List<String> imageUrls = const <String>[],
   }) {
     final composer = StructuredInputPromptComposer(
       settings: settings ?? const AppSettings(),
@@ -79,6 +84,7 @@ class ChatRepository {
       history: _toAiHistory(conversationHistory),
       requireJsonObject: true,
       profile: profile,
+      imageUrls: imageUrls,
     );
   }
 
@@ -106,7 +112,12 @@ class ChatRepository {
       .map(
         (message) => AiChatMessage(
           role: message.role.name,
-          content: message.content,
+          // Stored assistant messages contain display text, not the original
+          // protocol envelope. Keep history JSON-shaped without replaying old
+          // state transitions or inventing an event for legacy messages.
+          content: message.role == MessageRole.assistant
+              ? jsonEncode(<String, String>{'reply': message.content})
+              : message.content,
         ),
       )
       .toList(growable: false);

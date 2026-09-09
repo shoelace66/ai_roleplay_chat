@@ -22,6 +22,8 @@
 | 启动与加载 | 1 |
 | 合计 | 100 |
 
+第二轮格式错误回归已并入现有用例，总数仍为 100：使用真实 ChatProvider → ChatRepository → AiService → RoleplayTurn → 持久化链路，仅模拟 HTTP 供应商响应。覆盖流式/非流式 × OpenAI JSON/SSE/直接业务 JSON 六种组合，第一轮保存后重新打开对话再发送第二轮，检查历史 JSON、revision、正文和状态一起提交。另检查截断 finish_reason、错误字段/字符定位和调试原文保留。这些是离线回归，不能视为手机真实供应商故障已复现。
+
 真实 API 测试单独运行，不计入默认 100 个，也不会在普通测试时自动消费 Key：
 
 ```powershell
@@ -32,3 +34,13 @@ flutter test tool/typed_state_live_eval_test.dart --no-pub --reporter expanded
 该工具固定调用 DeepSeek / deepseek-chat，共 20 轮，复用应用实际提示词组织和 RoleplayTurn 状态校验。覆盖整数加减/零值、枚举切换、状态保留与显式清空。不会自动重试、伪造模型输出或修正失败结果；报告保留逐轮原始响应、token 用量和状态对照，不保存 Key 或请求头。未提供 Key 会明确失败，不会静默跳过。
 
 [本次真实测试结果](../reports/typed_state_live_2026-09-09.md)。
+
+豆包低级模型的 Responses 图文测试是显式 opt-in，不计入默认 100 个测试：
+
+```powershell
+$env:ARK_API_KEY = Read-Host 'ARK_API_KEY'
+flutter test tool/ark_responses_live_eval_test.dart --no-pub --reporter expanded
+```
+
+它通过应用的 `ChatRepository → AiService` 请求和响应解析链路，调用
+`https://ark.cn-beijing.volces.com/api/v3/responses`，发送一个图片 URL 和文本，检查非空输出。Key 只从当前进程读取，不写入报告或仓库。

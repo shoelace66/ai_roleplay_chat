@@ -372,6 +372,19 @@ class _LlmTabState extends State<_LlmTab> {
           onChanged: (v) => _updateTextDraft((d) => d.copyWith(baseUrl: v)),
           hint: 'https://api.openai.com/v1',
         ),
+        Padding(
+          padding: const EdgeInsets.only(left: 4, top: 2, bottom: 8),
+          child: Text(
+            '豆包 Responses API：Base URL 直接填写完整地址，例如 https://ark.cn-beijing.volces.com/api/v3/responses；应用会自动使用 input / output_text 格式。',
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurface
+                  .withValues(alpha: 0.6),
+            ),
+          ),
+        ),
         _ModelDropdownOrInput(
           models: preset.models,
           currentModel: _draft.model,
