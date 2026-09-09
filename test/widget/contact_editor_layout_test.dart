@@ -8,17 +8,18 @@ import 'package:flutter_chat_demo/core/presentation/app_theme.dart';
 import 'package:flutter_chat_demo/features/chat/presentation/widgets/contact_editor_dialog.dart';
 
 void main() {
-  for (final size in [
-    const Size(320, 568),
-    const Size(360, 640),
-    const Size(390, 844),
-    const Size(412, 915),
-    const Size(540, 720),
-    const Size(640, 360),
-    const Size(844, 390),
-  ]) {
-    for (final scale in [1.0, 1.3, 1.6]) {
-      testWidgets('创建窗口 $size 字体 $scale 完整显示并在键盘上方提交', (tester) async {
+  testWidgets('创建窗口覆盖七种尺寸和三档字体，键盘上方可提交', (tester) async {
+    for (final size in [
+      const Size(320, 568),
+      const Size(360, 640),
+      const Size(390, 844),
+      const Size(412, 915),
+      const Size(540, 720),
+      const Size(640, 360),
+      const Size(844, 390),
+    ]) {
+      for (final scale in [1.0, 1.3, 1.6]) {
+        tester.view.resetViewInsets();
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1;
         tester.platformDispatcher.textScaleFactorTestValue = scale;
@@ -102,7 +103,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(result?.naturalLanguage, '一个喜欢旅行的摄影师');
         expect(tester.takeException(), isNull);
-      });
+      }
     }
-  }
+  });
 }

@@ -9,6 +9,7 @@ void main() {
       StateDefinition(
           id: 'time',
           name: '时间',
+          type: 'enum',
           initialValue: '下午',
           enumValues: ['清晨', '下午', '傍晚']),
     ], values: {
@@ -35,6 +36,26 @@ void main() {
     expect(state.definitions.first.name, '当前时间');
     expect(state.definitions.first.enumValues, ['清晨', '下午', '傍晚']);
     expect(state.byName['当前时间'], '傍晚');
+    expect(state.definitions.first.type, 'enum');
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: StoryStateEditor(
+                value: state, onChanged: (value) => state = value))));
+    await tester.tap(find.text('当前时间'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('int · 整数').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(field('初值（可留空）'), '12');
+    await tester.ensureVisible(field('可选值 enum（可留空）'));
+    await tester.enterText(field('可选值 enum（可留空）'), '');
+    await tester.ensureVisible(field('当前值（留空表示清空）'));
+    await tester.enterText(field('当前值（留空表示清空）'), '6');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(state.definitions.first.type, 'int');
+    expect(state.toJson()['values']['time'], 6);
     expect(tester.takeException(), isNull);
   });
 }

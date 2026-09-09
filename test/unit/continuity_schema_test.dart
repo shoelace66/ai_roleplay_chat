@@ -14,6 +14,97 @@ void main() {
   Map<String, dynamic> example() =>
       jsonDecode(contactJsonExample) as Map<String, dynamic>;
 
+  test('int 导入、提示词数字、持久化、加减、清空与非法值原子拒绝', () {
+    final raw = {
+      'name': '计数测试',
+      'continuity': {
+        'revision': 0,
+        'definitions': [
+          {'id': 'count', 'label': '计数', 'type': 'int', 'defaultValue': 10},
+        ],
+        'values': {'count': 12}
+      }
+    };
+    final state = parser.parse(jsonEncode(raw))!.continuity;
+    expect(state.values['count'], '12');
+    expect(state.toJson()['values']['count'], 12);
+    expect(state.toJson()['definitions'][0]['defaultValue'], 10);
+    expect(ContinuityState.fromJson(state.toStorageJson()).toJson(),
+        state.toJson());
+    ContinuityState apply(dynamic to, {dynamic from = 12}) =>
+        const ContinuityStateMachine().apply(current: state, transition: {
+          'baseRevision': 0,
+          'changes': [
+            {'key': 'count', 'from': from, 'to': to}
+          ]
+        });
+    for (final value in [0, -3, 25, '+0025', '']) {
+      final changed = apply(value);
+      expect(changed.values['count'],
+          value == '' ? '' : int.parse(value.toString()).toString());
+    }
+    for (final value in [1.5, true, null, '1.0', '2枚', '9007199254740992']) {
+      expect(() => apply(value), throwsFormatException);
+      expect(state.values['count'], '12');
+    }
+    expect(() => apply(13, from: 11), throwsFormatException);
+    for (final invalid in [false, 2.5, 'abc']) {
+      final json = jsonDecode(jsonEncode(raw));
+      json['continuity']['values']['count'] = invalid;
+      expect(parser.parseDetailed(jsonEncode(json)).errorMessage,
+          contains(r'$.continuity.values.count'));
+    }
+  });
+
+  test('显式 enum 类型保留选项，缺选项与非法枚举拒绝，兼容旧 string 枚举', () {
+    for (final type in ['enum', 'string']) {
+      final state = ContinuityState.fromJson({
+        'revision': 0,
+        'definitions': [
+          {
+            'id': 'phase',
+            'label': '阶段',
+            'type': type,
+            'enum': ['初识', '熟悉'],
+            'defaultValue': '初识'
+          },
+        ],
+        'values': {'phase': '熟悉'}
+      });
+      expect(
+          ContinuityState.fromJson(state.toStorageJson())
+              .definitions
+              .first
+              .type,
+          type);
+      expect(
+          () =>
+              const ContinuityStateMachine().apply(current: state, transition: {
+                'baseRevision': 0,
+                'changes': [
+                  {'key': 'phase', 'from': '熟悉', 'to': '陌生'},
+                ]
+              }),
+          throwsFormatException);
+    }
+    for (final options in [
+      null,
+      [],
+      ['重复', '重复']
+    ]) {
+      final result = parser.parseDetailed(jsonEncode({
+        'name': '枚举测试',
+        'continuity': {
+          'definitions': [
+            {'id': 'phase', 'label': '阶段', 'type': 'enum', 'enum': options},
+          ]
+        }
+      }));
+      expect(result.data, isNull);
+      expect(result.errorMessage, contains('enum'));
+    }
+  });
+
   test('升级后旧格式的定义变更日志仍可精确回滚', () {
     final before = {
       'schemaVersion': 2,
@@ -38,17 +129,17 @@ void main() {
     expect(delta.apply(upgraded, oldLog, reverse: true), before);
   });
 
-  test('完整内置示例无需兼容修正，定义选项和当前值保存后保留', () {
+  test('完整内置示例的定义类型、选项和当前值保存后保留', () {
     final result = parser.parseDetailed(contactJsonExample);
-    expect(result.issues, isEmpty);
+    expect(result.errors, isEmpty);
     final state = result.data!.continuity;
     expect(state.revision, 1);
-    expect(state.definitions, hasLength(6));
+    expect(state.definitions, hasLength(7));
     expect(state.byName['关系阶段'], '熟悉');
     expect(state.definitions[3].initialValue, '初识');
     final saved = jsonDecode(jsonEncode(state.toJson()));
     expect(saved['definitions'][0]['label'], '当前时间');
-    expect(saved['definitions'][0]['type'], 'string');
+    expect(saved['definitions'][0]['type'], 'enum');
     expect(saved['definitions'][0]['enum'], contains('凌晨'));
     expect(saved['definitions'][0].containsKey('name'), isFalse);
     expect(ContinuityState.fromJson(saved).toJson(), state.toJson());

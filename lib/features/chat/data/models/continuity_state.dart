@@ -17,8 +17,40 @@ class StateDefinition {
   final String updateRule;
 
   // Explicit clearing remains supported; nonempty values obey the enum.
-  bool accepts(String value) =>
-      value.isEmpty || enumValues.isEmpty || enumValues.contains(value);
+  bool accepts(String value) {
+    try {
+      readValue(value);
+      return true;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  String readValue(dynamic value) {
+    if (value == '') return '';
+    if (type == 'int') {
+      final text = value is int
+          ? value.toString()
+          : value is String
+              ? value
+              : '';
+      final integer =
+          RegExp(r'^[+-]?\d+$').hasMatch(text) ? int.tryParse(text) : null;
+      if (integer == null || integer.abs() > 9007199254740991) {
+        throw FormatException('状态 $id 需要整数（范围 ±9007199254740991），实际值：$value');
+      }
+      return integer.toString();
+    }
+    if (value is! String) throw FormatException('状态 $id 需要文本，实际值：$value');
+    if (enumValues.isNotEmpty && !enumValues.contains(value)) {
+      throw FormatException(
+          '状态 $id 的值必须属于 enum：${enumValues.join('、')}；实际值：$value');
+    }
+    return value;
+  }
+
+  dynamic jsonValue(String value) =>
+      type == 'int' && value.isNotEmpty ? int.parse(readValue(value)) : value;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -26,7 +58,7 @@ class StateDefinition {
         'type': type,
         if (enumValues.isNotEmpty) 'enum': enumValues,
         'description': description,
-        'defaultValue': initialValue,
+        'defaultValue': jsonValue(initialValue),
         'updateRule': updateRule
       };
 
@@ -37,6 +69,7 @@ class StateDefinition {
         'description': description,
         'initialValue': initialValue,
         'updateRule': updateRule,
+        if (type != 'string') 'type': type,
         if (enumValues.isNotEmpty) 'enum': enumValues,
       };
   factory StateDefinition.fromJson(Map json) {
@@ -46,8 +79,6 @@ class StateDefinition {
       'label',
       'type',
       'description',
-      'initialValue',
-      'defaultValue',
       'updateRule'
     ]) {
       if (json[key] != null && json[key] is! String) {
@@ -66,15 +97,22 @@ class StateDefinition {
         (options is! List || options.any((v) => v is! String))) {
       throw const FormatException('enum 必须是文本数组');
     }
-    return StateDefinition(
+    final shell = StateDefinition(
         id: json['id'] as String? ?? '',
         name: (json['label'] ?? json['name']) as String? ?? '',
         type: json['type'] as String? ?? 'string',
         enumValues: List<String>.unmodifiable(options as List? ?? const []),
         description: json['description'] as String? ?? '',
-        initialValue:
-            (json['defaultValue'] ?? json['initialValue']) as String? ?? '',
         updateRule: json['updateRule'] as String? ?? '');
+    return StateDefinition(
+        id: shell.id,
+        name: shell.name,
+        type: shell.type,
+        enumValues: shell.enumValues,
+        description: shell.description,
+        updateRule: shell.updateRule,
+        initialValue: shell
+            .readValue(json['defaultValue'] ?? json['initialValue'] ?? ''));
   }
 }
 
@@ -103,20 +141,22 @@ class ContinuityState {
           !names.add(definition.name.trim())) {
         throw const FormatException('状态名称和 ID 不能为空或重复');
       }
-      if (definition.type != 'string') {
-        throw FormatException('状态 ${definition.id} 的 type 仅支持 string');
+      if (!const ['string', 'int', 'enum'].contains(definition.type)) {
+        throw FormatException('状态 ${definition.id} 的 type 支持 string、int、enum');
+      }
+      if (definition.type == 'enum' && definition.enumValues.isEmpty) {
+        throw FormatException('状态 ${definition.id} 的 enum 类型需要非空选项数组');
+      }
+      if (definition.type == 'int' && definition.enumValues.isNotEmpty) {
+        throw FormatException('状态 ${definition.id} 的 int 类型不能设置 enum 选项');
       }
       if (definition.enumValues.any((v) => v.trim().isEmpty) ||
           definition.enumValues.toSet().length !=
               definition.enumValues.length) {
         throw FormatException('状态 ${definition.id} 的 enum 选项不能为空或重复');
       }
-      if (!definition.accepts(definition.initialValue) ||
-          !definition
-              .accepts(values[definition.id] ?? definition.initialValue)) {
-        throw FormatException(
-            '状态 ${definition.id} 的默认值或当前值必须属于 enum：${definition.enumValues.join('、')}');
-      }
+      definition.readValue(definition.initialValue);
+      definition.readValue(values[definition.id] ?? definition.initialValue);
     }
     if (revision < 0 || values.keys.any((key) => !ids.contains(key))) {
       throw const FormatException('当前值不属于已定义的状态');
@@ -153,13 +193,6 @@ class ContinuityState {
     if (json is! Map || json['values'] is! Map || json['revision'] is! int) {
       throw const FormatException('故事状态格式错误');
     }
-    final values = <String, String>{};
-    for (final entry in (json['values'] as Map).entries) {
-      if (entry.key is! String || entry.value is! String) {
-        throw const FormatException('状态值必须使用文本');
-      }
-      values[entry.key as String] = entry.value as String;
-    }
     final raw = json['definitions'];
     if (raw != null && raw is! List) throw const FormatException('状态定义格式错误');
     final definitions = raw == null
@@ -168,6 +201,19 @@ class ContinuityState {
             if (item is! Map) throw const FormatException('状态定义格式错误');
             return StateDefinition.fromJson(item);
           }).toList();
+    final values = <String, String>{};
+    for (final entry in (json['values'] as Map).entries) {
+      if (entry.key is! String) throw const FormatException('状态 ID 必须使用文本');
+      final definition =
+          definitions?.where((d) => d.id == entry.key).firstOrNull;
+      if (definition != null) {
+        values[entry.key as String] = definition.readValue(entry.value);
+      } else if (entry.value is String) {
+        values[entry.key as String] = entry.value as String;
+      } else {
+        throw const FormatException('未定义类型的状态值必须使用文本');
+      }
+    }
     return ContinuityState(
         revision: json['revision'] as int,
         definitions: definitions,
@@ -178,11 +224,15 @@ class ContinuityState {
         'revision': revision,
         'definitions': definitions.map((d) => d.toJson()).toList(),
         'values': {
-          for (final d in definitions) d.id: values[d.id] ?? d.initialValue
+          for (final d in definitions)
+            d.id: d.jsonValue(values[d.id] ?? d.initialValue)
         }
       };
   Map<String, dynamic> toStorageJson() => {
         ...toJson(),
         'definitions': definitions.map((d) => d.toStorageJson()).toList(),
+        'values': {
+          for (final d in definitions) d.id: values[d.id] ?? d.initialValue
+        },
       };
 }

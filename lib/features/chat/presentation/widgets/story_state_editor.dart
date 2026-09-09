@@ -95,6 +95,7 @@ class _DefinitionDialogState extends State<_DefinitionDialog> {
           : widget.value.values[widget.definition!.id] ??
               widget.definition!.initialValue);
   String? error;
+  late String stateType = widget.definition?.type ?? 'string';
   @override
   void dispose() {
     for (final controller in [
@@ -125,12 +126,12 @@ class _DefinitionDialogState extends State<_DefinitionDialog> {
         id: id,
         name: name.text.trim(),
         description: description.text,
-        type: widget.definition?.type ?? 'string',
+        type: stateType,
         enumValues: List.unmodifiable(options.text
             .split('\n')
             .map((v) => v.trim())
             .where((v) => v.isNotEmpty)),
-        initialValue: initial.text,
+        initialValue: stateType == 'int' ? initial.text.trim() : initial.text,
         updateRule: rule.text);
     try {
       final updated = ContinuityState(revision: value.revision, definitions: [
@@ -139,7 +140,11 @@ class _DefinitionDialogState extends State<_DefinitionDialog> {
         if (definition == null) next
       ], values: {
         ...value.values,
-        id: definition == null ? initial.text : current.text
+        id: next.readValue(stateType == 'int'
+            ? (definition == null ? initial.text : current.text).trim()
+            : definition == null
+                ? initial.text
+                : current.text)
       });
       Navigator.pop(context, updated);
     } on FormatException catch (e) {
@@ -164,6 +169,18 @@ class _DefinitionDialogState extends State<_DefinitionDialog> {
                   maxLines: 4,
                   decoration: const InputDecoration(
                       labelText: '记录说明', hintText: '需要持续保留哪些细节')),
+              DropdownButtonFormField<String>(
+                  initialValue: stateType,
+                  decoration: const InputDecoration(labelText: '类型'),
+                  items: const [
+                    DropdownMenuItem(
+                        value: 'string', child: Text('string · 文本')),
+                    DropdownMenuItem(value: 'int', child: Text('int · 整数')),
+                    DropdownMenuItem(value: 'enum', child: Text('enum · 枚举')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) setState(() => stateType = v);
+                  }),
               TextField(
                   controller: initial,
                   minLines: 1,
@@ -176,7 +193,7 @@ class _DefinitionDialogState extends State<_DefinitionDialog> {
                   decoration: const InputDecoration(
                       labelText: '可选值 enum（可留空）',
                       hintText: '每行一个，例如：\n清晨\n下午\n深夜',
-                      helperText: '类型为 string；不填可自由记录，填写后非空值须选自列表。',
+                      helperText: 'enum 类型必须填写；string 可选填；int 不填。非空值须选自列表。',
                       helperMaxLines: 3)),
               TextField(
                   controller: rule,

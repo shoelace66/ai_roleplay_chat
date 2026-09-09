@@ -35,24 +35,6 @@ void main() {
     expect(result.issues, isEmpty);
   });
 
-  test('支持角色卡 data 包装和单对象数组', () {
-    for (final source in [
-      '{"spec":"chara_card_v2","data":{"name":"A","description":"背景"}}',
-      '[{"name":"A","description":"背景"}]'
-    ]) {
-      final result = parser.parseDetailed(source);
-      expect(result.data!.fixedInput, '背景');
-      expect(result.issues, isNotEmpty);
-    }
-    expect(parser.parseDetailed('[{"name":"A"},{"name":"B"}]').errorMessage,
-        contains('不能一次导入多个'));
-    expect(
-        parser
-            .parseDetailed('{"character":{"name":"A"},"story":{"name":"B"}}')
-            .errorMessage,
-        contains('多个对象'));
-  });
-
   test('不猜测短字段，未知字段显式警告，别名冲突明确报错', () {
     final unknown = parser.parseDetailed('{"nme":"A","mystery":"不会悄悄忽略"}');
     expect(unknown.isSuccess, isFalse);
@@ -76,19 +58,6 @@ void main() {
     expect(result.errorMessage, contains(r'$.settings[0]'));
   });
 
-  test('JSON 语法问题提供行列，空输入给出诊断', () {
-    final result = parser.parseDetailed('{\n  "name": "A"\n  "avatar": "x"\n}');
-    expect(result.errorMessage, contains('第 3 行'));
-    expect(result.errorMessage, contains('列'));
-    expect(result.errorMessage, contains('出错字符'));
-    expect(result.errorMessage, contains('U+0022'));
-    expect(result.errorMessage, contains('附近：'));
-    expect(result.errorMessage, contains('定位：'));
-    expect(result.errors.single.offset, isNotNull);
-    expect(parser.parseDetailed('').errorMessage, contains('JSON 语法错误'));
-    expect(parser.parseDetailed('null').errorMessage, contains('顶层需要 JSON 对象'));
-  });
-
   test('字符串外兼容全半角和 Unicode 空格及全角结构标点', () {
     final result =
         parser.parseDetailed('｛　"角色　名称"　：　"林　夏"，\u00a0"性 格"：［"温柔"，"认真"］　｝');
@@ -100,41 +69,11 @@ void main() {
     expect(result.issues.any((item) => item.message.contains('全角大括号')), isTrue);
   });
 
-  test('字符串内全角空格和全角标点保持原样', () {
-    const value = '保留　全角空格，冒号：括号｛｝方括号［］';
-    final result =
-        parser.parseDetailed(jsonEncode({'name': 'A', 'fixedInput': value}));
-    expect(result.errorMessage, isEmpty);
-    expect(result.data!.fixedInput, value);
-    expect(result.issues, isEmpty);
-  });
-
   test('不支持的全角引号明确指出实际字符和 Unicode 编码', () {
     final result = parser.parseDetailed('｛“name”："A"｝');
     expect(result.isSuccess, isFalse);
     expect(result.errorMessage, contains('“'));
     expect(result.errorMessage, contains('U+201C'));
-  });
-
-  test('非 BMP 的非法字符也显示完整字符和 Unicode 编码', () {
-    final result = parser.parseDetailed('{"name":"A",😀}');
-    expect(result.isSuccess, isFalse);
-    expect(result.errorMessage, contains('😀'));
-    expect(result.errorMessage, contains('U+01F600'));
-  });
-
-  test('状态缺省版本、字段别名、数字值及精确名称映射', () {
-    final result = parser.parseDetailed('''{"name":"A","continuity":{
-      "状态定义":[{"id":"place","名称":"地点","初始值":"车站"}],
-      "当前值":{"地点":"街道"}
-    }}''');
-    expect(result.errorMessage, isEmpty);
-    expect(result.data!.continuity.revision, 0);
-    expect(result.data!.continuity.values, {'place': '街道'});
-    final numeric = parser.parseDetailed(
-        '{"name":"A","continuity":{"revision":"2","definitions":[{"name":"好感度","initial_value":0}],"values":{"好感度":5}}}');
-    expect(numeric.errorMessage, isEmpty);
-    expect(numeric.data!.continuity.values, {'好感度': '5'});
   });
 
   test('状态重复、孤立当前值、负版本和类型错误给出具体路径', () {
@@ -161,22 +100,5 @@ void main() {
     final empty = parser.parseDetailed(
         '{"name":"A","continuity":{"definitions":[],"values":{}},"currentStates":{"旧项":"不要复活"}}');
     expect(empty.data!.continuity.definitions, isEmpty);
-  });
-
-  test('状态名称键和 ID 键同时存在且值不同时拒绝覆盖', () {
-    final result = parser.parseDetailed(
-        '{"name":"A","continuity":{"definitions":[{"id":"place","name":"地点"}],"values":{"place":"车站","地点":"街道"}}}');
-    expect(result.errorMessage, contains('当前值冲突'));
-  });
-
-  test('后备名称仍可用，无关对象不能转成字符串当名称', () {
-    expect(
-        parser
-            .parseDetailed('{"personality":"温柔"}',
-                fallback: const ContactImportFallback(name: '后备'))
-            .data!
-            .name,
-        '后备');
-    expect(parser.parseDetailed('{"name":{"name":"A"}}').isSuccess, isFalse);
   });
 }

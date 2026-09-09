@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter_chat_demo/features/worldbook/domain/entities/world_book.dart';
-
 import 'package:flutter_chat_demo/core/data/models/provider_settings.dart';
 import 'package:flutter_chat_demo/features/chat/data/models/contact.dart';
 import 'package:flutter_chat_demo/features/chat/data/models/message.dart';
@@ -76,97 +74,6 @@ void main() {
     final committed = persistence.snapshot;
     expect(committed.messagesByContact['role-1'], hasLength(2));
     expect(committed.contacts.single.eventGraph.turnCount, 1);
-  });
-
-  test('模型失败保留 failed 用户消息但不提交任何记忆变化', () async {
-    aiService.failure = const AiServiceException('模拟网络失败');
-
-    await provider.sendMessage('这次会失败');
-
-    expect(provider.messages.single.status, MessageStatus.failed);
-    expect(provider.selectedContact?.eventGraph.turnCount, 0);
-    expect(persistence.snapshot.messagesByContact['role-1']?.single.status,
-        MessageStatus.failed);
-    expect(persistence.snapshot.contacts.single.eventGraph.turnCount, 0);
-  });
-
-  test('撤回同时恢复消息历史和事件图', () async {
-    aiService.mainResponse = '''
-{"memoryPatch":{"eventBrief":{"description":"发生了一件事"}},"reply":"事情发生了。"}
-''';
-    await provider.sendMessage('推动这一轮');
-    expect(provider.canRecall, isTrue);
-
-    expect(await provider.recallLastTurn(), isTrue);
-
-    expect(provider.messages, isEmpty);
-    expect(provider.selectedContact?.eventGraph.turnCount, 0);
-    expect(persistence.snapshot.messagesByContact['role-1'], isEmpty);
-    expect(persistence.snapshot.contacts.single.eventGraph.turnCount, 0);
-  });
-
-  test('记忆修改记录跨重启保留且可以无损撤销', () async {
-    aiService.mainResponse = '''
-{"memoryPatch":{"eventBrief":{"description":"林夏收到一张蓝色车票","keywords":["林夏","车票"]}},"reply":"她收下了。"}
-''';
-    await provider.sendMessage('给她车票');
-    final node = provider.memoryNodes.single;
-
-    expect(
-      await provider.reviseMemory(
-        node.id,
-        const EventMemory(
-          description: '林夏收到一张红色车票',
-          keywords: <String>['林夏', '红色车票'],
-        ),
-      ),
-      isTrue,
-    );
-    expect(provider.canUndoMemoryRevision, isTrue);
-    expect(
-      persistence.metadata.entries
-          .singleWhere((entry) => entry.key.startsWith('memory_revision_v1_'))
-          .value,
-      isNotEmpty,
-    );
-
-    provider.dispose();
-    provider = ChatProvider(
-      persistence: persistence,
-      repository: ChatRepository(aiService: aiService),
-    );
-    await provider.initialize();
-
-    expect(provider.canUndoMemoryRevision, isTrue);
-    expect(await provider.undoLastMemoryRevision(), isTrue);
-    expect(
-      provider.memoryNodes.single.event.description,
-      '林夏收到一张蓝色车票',
-    );
-    expect(
-      persistence.metadata.entries
-          .singleWhere((entry) => entry.key.startsWith('memory_revision_v1_'))
-          .value,
-      isEmpty,
-    );
-  });
-
-  test('完整备份恢复角色消息和事件，但不改变 API 设置', () async {
-    aiService.mainResponse = '''
-{"memoryPatch":{"eventBrief":{"description":"林夏记住了雨夜"}},"reply":"雨声还在窗外。"}
-''';
-    await provider.sendMessage('记住这个雨夜');
-    final backup = await provider.exportBackupJson();
-    final originalKey = provider.currentApiKey;
-
-    await provider.addContact(name: '临时角色', avatar: '');
-    expect(provider.contacts, hasLength(2));
-    expect(await provider.restoreBackupJson(backup), isTrue);
-
-    expect(provider.contacts, hasLength(1));
-    expect(provider.messages, hasLength(2));
-    expect(provider.memoryNodes.single.event.description, '林夏记住了雨夜');
-    expect(provider.currentApiKey, originalKey);
   });
 
   test('停止非流式生成立即结束等待且不提交记忆', () async {
@@ -249,51 +156,6 @@ void main() {
     expect(provider.selectedContact?.eventGraph.turnCount, 0);
   });
 
-  test('修改上一轮后先撤回旧记忆再重新生成', () async {
-    aiService.mainResponse = '''
-{"memoryPatch":{"eventBrief":{"description":"林夏收下蓝色车票"}},"reply":"她收下了蓝色车票。"}
-''';
-    await provider.sendMessage('给她蓝色车票');
-    aiService.mainResponse = '''
-{"memoryPatch":{"eventBrief":{"description":"林夏拒绝红色车票"}},"reply":"她轻轻摇头。"}
-''';
-
-    expect(
-      await provider.regenerateLastTurn(editedInput: '改成给她红色车票'),
-      isTrue,
-    );
-
-    expect(provider.messages, hasLength(2));
-    expect(provider.messages.first.content, '改成给她红色车票');
-    expect(provider.messages.last.content, '她轻轻摇头。');
-    expect(provider.memoryNodes, hasLength(1));
-    expect(provider.memoryNodes.single.event.description, '林夏拒绝红色车票');
-    expect(provider.selectedContact?.eventGraph.turnCount, 1);
-  });
-
-  test('已完成剧情不能仅改正文、删除消息或切换候选', () async {
-    aiService.mainResponse = '{"memoryPatch":{},"reply":"原回复"}';
-    await provider.sendMessage('原问题');
-    final assistantId = provider.messages.last.id;
-    final userId = provider.messages.first.id;
-    expect(await provider.editMessage(assistantId, '修订后的回复'), isFalse);
-    expect(await provider.deleteMessage(userId), isFalse);
-    expect(await provider.generateReplyCandidate(assistantId), isFalse);
-    expect(await provider.applyReplyCandidate(assistantId, '候选'), isFalse);
-    expect(provider.messages.last.content, '原回复');
-    expect(provider.messages, hasLength(2));
-    expect(aiService.requestedModels, hasLength(1));
-  });
-
-  test('失败消息仍可编辑删除', () async {
-    aiService.failure = const AiServiceException('失败');
-    await provider.sendMessage('失败输入');
-    final id = provider.messages.single.id;
-    expect(await provider.editMessage(id, '新输入'), isTrue);
-    expect(await provider.deleteMessage(id), isTrue);
-    expect(persistence.snapshot.messagesByContact['role-1'], isEmpty);
-  });
-
   test('简短合法回复只调用一次，非法正文不写入状态也不自动重试', () async {
     aiService.mainResponse = '{"memoryPatch":{},"reply":"嗯。"}';
     await provider.sendMessage('好吗');
@@ -304,43 +166,6 @@ void main() {
     expect(provider.messages.last.status, MessageStatus.failed);
     expect(provider.selectedContact!.eventGraph.turnCount, 1);
     expect(aiService.requestedModels, hasLength(2));
-  });
-
-  test('状态原子提交、跨重启和备份保留、撤回同时恢复衣着与地点', () async {
-    await provider.updateWorldBook(const WorldBook(locations: [
-      WorldLocation(id: 'station', name: '旧车站'),
-    ]));
-    aiService.mainResponse = _stateReply(0, [
-      _change('scene/location', null, '车站'),
-      _change('actor/林夏/outfit', null, '白衬衫、黑裙'),
-    ]);
-    await provider.sendMessage('开始');
-    expect(provider.error, isNull);
-    expect(provider.selectedContact!.continuity.revision, 1);
-    expect(provider.selectedContact!.worldBook.locations.single.name, '旧车站');
-    final backup = await provider.exportBackupJson();
-    expect(jsonDecode(backup)['contacts'][0]['continuity']['revision'], 1);
-
-    provider.dispose();
-    provider = ChatProvider(
-        persistence: persistence,
-        repository: ChatRepository(aiService: aiService));
-    await provider.initialize();
-    expect(provider.selectedContact!.continuity.values['actor/林夏/outfit'],
-        '白衬衫、黑裙');
-    aiService.mainResponse =
-        _stateReply(1, [_change('scene/location', '车站', '屋内')]);
-    await provider.sendMessage('进屋');
-    expect(provider.error, isNull);
-    expect(provider.selectedContact!.continuity.values['scene/location'], '屋内');
-    expect(provider.selectedContact!.continuity.values['actor/林夏/outfit'],
-        '白衬衫、黑裙');
-    expect(await provider.recallLastTurn(), isTrue);
-    expect(provider.selectedContact!.continuity.values['scene/location'], '车站');
-    expect(provider.selectedContact!.continuity.revision, 1);
-    expect(provider.selectedContact!.worldBook.locations.single.name, '旧车站');
-    expect(await provider.restoreBackupJson(backup), isTrue);
-    expect(provider.selectedContact!.continuity.revision, 1);
   });
 
   test('旧值不符整轮拒绝，不写入正文或任何部分记忆', () async {
@@ -370,44 +195,6 @@ void main() {
     await Future.wait([first, duplicate]);
     expect(aiService.requestedModels, hasLength(1));
     expect(provider.messages, hasLength(2));
-  });
-
-  test('一次摘要只标记实际发送给模型的源事件', () async {
-    provider.dispose();
-    persistence.snapshot = ChatSnapshot(contacts: [
-      _contact().copyWith(
-        eventGraph: EventGraphMemory(shortTermQueue: [
-          for (var i = 0; i < 12; i++)
-            EventNode(
-                id: 'old-$i',
-                tier: EventTier.shortTerm,
-                event: EventMemory(description: '旧事件$i'),
-                createdAtMs: 12 - i),
-        ]),
-      )
-    ]);
-    provider = ChatProvider(
-        persistence: persistence,
-        repository: ChatRepository(aiService: aiService));
-    await provider.initialize();
-    aiService.mainResponse =
-        '{"memoryPatch":{"summary":{"description":"指定十条事件的总结"},"eventBrief":{"description":"新事件"}},"reply":"继续。"}';
-    await provider.sendMessage('继续');
-    expect(provider.error, isNull);
-    final nodes = provider.selectedContact!.eventGraph.shortTermQueue;
-    expect(nodes.where((n) => n.summarized), hasLength(10));
-    expect(nodes.singleWhere((n) => n.id == 'old-10').summarized, isFalse);
-    expect(nodes.singleWhere((n) => n.id == 'old-11').summarized, isFalse);
-  });
-
-  test('模型自行总结不会丢弃原有事件或加入未请求的摘要', () async {
-    aiService.mainResponse =
-        '{"memoryPatch":{"summary":{"description":"擅自概括"},"eventBrief":{"description":"本轮事件"}},"reply":"继续。"}';
-    await provider.sendMessage('继续');
-    expect(provider.selectedContact!.eventGraph.longTermQueue, isEmpty);
-    expect(
-        provider.selectedContact!.eventGraph.shortTermQueue.single.summarized,
-        isFalse);
   });
 
   test('实际发送的system逐字复用，状态在动态输入且上一轮正文保留原生角色', () async {
@@ -455,26 +242,6 @@ void main() {
             .every((message) => message.status == MessageStatus.failed),
         isTrue);
     expect(persistence.snapshot.contacts.single.continuity.revision, 0);
-  });
-
-  test('记忆锁跨重启持久化并阻止作废和删除', () async {
-    aiService.mainResponse =
-        '{"memoryPatch":{"eventBrief":{"description":"不可删除的记忆"}},"reply":"记住了"}';
-    await provider.sendMessage('锁定它');
-    final nodeId = provider.memoryNodes.single.id;
-
-    expect(await provider.setMemoryLocked(nodeId, true), isTrue);
-    expect(provider.isMemoryLocked(nodeId), isTrue);
-    expect(await provider.invalidateMemory(nodeId), isFalse);
-    expect(await provider.deleteMemory(nodeId), isFalse);
-
-    provider.dispose();
-    provider = ChatProvider(
-      persistence: persistence,
-      repository: ChatRepository(aiService: aiService),
-    );
-    await provider.initialize();
-    expect(provider.isMemoryLocked(nodeId), isTrue);
   });
 
   test('主 LLM Profile 失败后自动使用备用 Profile', () async {

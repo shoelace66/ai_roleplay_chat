@@ -411,7 +411,7 @@ class _ContactEditorDialogState extends State<ContactEditorDialog> {
           const SizedBox(height: 8),
           const Text(
             '状态定义使用 id / label / type / description / defaultValue，可选 enum 和 updateRule。'
-            'values 按 id 保存当前值，省略某项时使用默认值。type 当前支持 string；'
+            'values 按 id 保存当前值，省略某项时使用默认值。type 支持 string、int、enum；'
             'enum 限制非空值，空字符串表示明确清空。旧 name / initialValue 仍可导入。',
             style: TextStyle(fontSize: 12),
           ),

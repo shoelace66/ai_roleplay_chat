@@ -4,6 +4,8 @@
 
 当前工作区的连续性与成本重构说明见 [CONTINUITY_REFACTOR.md](docs/CONTINUITY_REFACTOR.md)，Agent 式提示词组织说明见 [AGENT_PROMPT_REFACTOR.md](docs/AGENT_PROMPT_REFACTOR.md)。
 
+状态定义支持 `string / int / enum`，详见 [JSON 完整示例与字段说明](docs/CONTINUITY_JSON.md)。默认测试精简为 [100 个核心测试](docs/TEST_SUITE.md)；另提供 [DeepSeek 20 轮真实测试记录](reports/typed_state_live_2026-09-09.md)。
+
 [![Flutter](https://img.shields.io/badge/Flutter-3.41.2-02569B)](.) [![Dart](https://img.shields.io/badge/Dart-3.11%2B-0175C2)](.) [![License](https://img.shields.io/badge/license-private-lightgrey)](.)
 
 ---

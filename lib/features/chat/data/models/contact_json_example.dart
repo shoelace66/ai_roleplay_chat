@@ -24,7 +24,7 @@ const contactJsonExample = r'''{
       {
         "id": "time_of_day",
         "label": "当前时间",
-        "type": "string",
+        "type": "enum",
         "enum": ["清晨", "上午", "中午", "下午", "傍晚", "深夜", "凌晨"],
         "description": "当前场景的时间段，影响光线、氛围和角色的身体状态。",
         "defaultValue": "下午",
@@ -41,7 +41,7 @@ const contactJsonExample = r'''{
       {
         "id": "weather",
         "label": "天气",
-        "type": "string",
+        "type": "enum",
         "enum": ["晴", "多云", "小雨", "大雨", "雨后初晴"],
         "description": "当前场景可直接观察到的天气。",
         "defaultValue": "雨后初晴",
@@ -50,7 +50,7 @@ const contactJsonExample = r'''{
       {
         "id": "relationship",
         "label": "关系阶段",
-        "type": "string",
+        "type": "enum",
         "enum": ["初识", "熟悉", "信任", "亲密"],
         "description": "林夏与用户之间已经建立的关系阶段。",
         "defaultValue": "初识",
@@ -71,6 +71,14 @@ const contactJsonExample = r'''{
         "description": "完整保留已经确认的重要线索；猜测应注明尚未证实。",
         "defaultValue": "",
         "updateRule": "发现新线索时补充，原有线索只有被明确证伪时才修正。"
+      },
+      {
+        "id": "film_remaining",
+        "label": "剩余胶片张数",
+        "type": "int",
+        "description": "相机里尚未拍摄的胶片数量，使用整数。",
+        "defaultValue": 12,
+        "updateRule": "实际拍照才按张数扣减；换胶卷时按明确张数更新，不凭空增加。"
       }
     ],
     "values": {
@@ -79,7 +87,8 @@ const contactJsonExample = r'''{
       "weather": "雨后初晴",
       "relationship": "熟悉",
       "current_activity": "收起雨伞，准备离开电车站",
-      "confirmed_clues": ""
+      "confirmed_clues": "",
+      "film_remaining": 12
     }
   }
 }''';

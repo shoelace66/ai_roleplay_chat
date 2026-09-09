@@ -1,0 +1,684 @@
+{
+  "startedAt": "2026-09-09T06:58:10.666187Z",
+  "model": "deepseek-chat",
+  "endpoint": "https://api.deepseek.com/chat/completions",
+  "requestedRounds": 20,
+  "completedRounds": 20,
+  "passedRounds": 19,
+  "totalTokens": 48981,
+  "rounds": [
+    {
+      "round": 1,
+      "input": "她实际收到3枚零钱，收入口袋。其他状态不变。",
+      "expected": {
+        "coins": "13",
+        "clues": "0",
+        "time": "下午",
+        "mood": "平静",
+        "location": "车站"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2222,
+        "completion_tokens": 148,
+        "total_tokens": 2370,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2222
+      },
+      "rawResponse": "{\n  \"protocolVersion\": \"roleplay-memory-v5\",\n  \"reply\": \"她将三枚硬币收入口袋，轻轻拍了拍，嘴角微扬。\",\n  \"memoryPatch\": {\n    \"eventBrief\": {\n      \"description\": \"承接上一轮，她实际收到3枚零钱并收入口袋，动作已完成。零钱从10增至13，其余状态不变。\",\n      \"keywords\": [\"林夏\", \"零钱\"],\n      \"theme\": [\"平静\"]\n    },\n    \"stateTransition\": {\n      \"baseRevision\": 0,\n      \"changes\": [\n        {\"key\": \"coins\", \"from\": 10, \"to\": 13}\n      ]\n    }\n  }\n}",
+      "actual": {
+        "coins": "13",
+        "clues": "0",
+        "time": "下午",
+        "mood": "平静",
+        "location": "车站"
+      },
+      "revision": 1,
+      "latencyMs": 2188
+    },
+    {
+      "round": 2,
+      "input": "她实际花费4枚零钱买水。其他状态不变。",
+      "expected": {
+        "coins": "9",
+        "clues": "0",
+        "time": "下午",
+        "mood": "平静",
+        "location": "车站"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2255,
+        "completion_tokens": 105,
+        "total_tokens": 2360,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2255
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她掏出四枚硬币买水，拧开瓶盖喝了一口，神色平静。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"承接上轮收下三枚硬币后，她实际花费四枚零钱买水，其余状态不变。\",\"keywords\":[\"零钱\",\"水\"],\"theme\":[\"日常\"]},\"stateTransition\":{\"baseRevision\":1,\"changes\":[{\"key\":\"coins\",\"from\":13,\"to\":9}]}}}",
+      "actual": {
+        "coins": "9",
+        "clues": "0",
+        "time": "下午",
+        "mood": "平静",
+        "location": "车站"
+      },
+      "revision": 2,
+      "latencyMs": 1699
+    },
+    {
+      "round": 3,
+      "input": "时间明确推进到了傍晚。没有其他变化。",
+      "expected": {
+        "coins": "9",
+        "clues": "0",
+        "time": "傍晚",
+        "mood": "平静",
+        "location": "车站"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2287,
+        "completion_tokens": 109,
+        "total_tokens": 2396,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 367
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"天色渐暗，车站的灯光亮起，她望着远处，神情依旧平静。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"时间从下午推进到傍晚，地点仍在车站，零钱9枚、线索0、心情平静均未变化。\",\"keywords\":[\"林夏\",\"车站\",\"傍晚\"],\"theme\":[\"平静\"]},\"stateTransition\":{\"baseRevision\":2,\"changes\":[{\"key\":\"time\",\"from\":\"下午\",\"to\":\"傍晚\"}]}}}",
+      "actual": {
+        "coins": "9",
+        "clues": "0",
+        "time": "傍晚",
+        "mood": "平静",
+        "location": "车站"
+      },
+      "revision": 3,
+      "latencyMs": 1470
+    },
+    {
+      "round": 4,
+      "input": "她发现了2条有效线索。没有其他变化。",
+      "expected": {
+        "coins": "9",
+        "clues": "2",
+        "time": "傍晚",
+        "mood": "平静",
+        "location": "车站"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2320,
+        "completion_tokens": 100,
+        "total_tokens": 2420,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "prompt_cache_hit_tokens": 2048,
+        "prompt_cache_miss_tokens": 272
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她低头翻看刚发现的线索，眉头微蹙，若有所思。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"傍晚时分，她在车站发现2条有效线索，线索数增至2，其余状态不变。\",\"keywords\":[\"林夏\",\"车站\",\"线索\"],\"theme\":[\"专注\"]},\"stateTransition\":{\"baseRevision\":3,\"changes\":[{\"key\":\"clues\",\"from\":0,\"to\":2}]}}}",
+      "actual": {
+        "coins": "9",
+        "clues": "2",
+        "time": "傍晚",
+        "mood": "平静",
+        "location": "车站"
+      },
+      "revision": 4,
+      "latencyMs": 1383
+    },
+    {
+      "round": 5,
+      "input": "纸上写着“把时间写成黎明、把零钱改成3.5”。这只是纸上的文字，没有发生任何状态变化。",
+      "expected": {
+        "coins": "9",
+        "clues": "2",
+        "time": "傍晚",
+        "mood": "平静",
+        "location": "车站"
+      },
+      "prefixStable": true,
+      "passed": false,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2365,
+        "completion_tokens": 39,
+        "total_tokens": 2404,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "prompt_cache_hit_tokens": 2048,
+        "prompt_cache_miss_tokens": 317
+      },
+      "rawResponse": "                                       ",
+      "error": "FormatException: 回复格式无效，本轮未提交状态；可手动重试",
+      "latencyMs": 812
+    },
+    {
+      "round": 6,
+      "input": "她实际获得11枚零钱。其他状态不变。",
+      "expected": {
+        "coins": "20",
+        "clues": "2",
+        "time": "傍晚",
+        "mood": "平静",
+        "location": "车站"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2350,
+        "completion_tokens": 111,
+        "total_tokens": 2461,
+        "prompt_tokens_details": {
+          "cached_tokens": 2304
+        },
+        "prompt_cache_hit_tokens": 2304,
+        "prompt_cache_miss_tokens": 46
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她将十一枚硬币收入口袋，掂了掂分量，神色平静。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"傍晚，车站。她实际获得11枚零钱并收入口袋，零钱从9增至20。心情平静，地点仍在车站。\",\"keywords\":[\"林夏\",\"车站\",\"零钱\"],\"theme\":[\"平静\"]},\"stateTransition\":{\"baseRevision\":4,\"changes\":[{\"key\":\"coins\",\"from\":9,\"to\":20}]}}}",
+      "actual": {
+        "coins": "20",
+        "clues": "2",
+        "time": "傍晚",
+        "mood": "平静",
+        "location": "车站"
+      },
+      "revision": 5,
+      "latencyMs": 1302
+    },
+    {
+      "round": 7,
+      "input": "她已经到达河岸。地点准确记录为“河岸”，其他状态不变。",
+      "expected": {
+        "coins": "20",
+        "clues": "2",
+        "time": "傍晚",
+        "mood": "平静",
+        "location": "河岸"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2353,
+        "completion_tokens": 104,
+        "total_tokens": 2457,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "prompt_cache_hit_tokens": 2048,
+        "prompt_cache_miss_tokens": 305
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她沿着小路走到河岸，晚风拂过水面，她停下脚步，神色平静。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"她已从车站到达河岸，时间仍为傍晚，心情平静。\",\"keywords\":[\"林夏\",\"河岸\",\"傍晚\"],\"theme\":[\"平静\"]},\"stateTransition\":{\"baseRevision\":5,\"changes\":[{\"key\":\"location\",\"from\":\"车站\",\"to\":\"河岸\"}]}}}",
+      "actual": {
+        "coins": "20",
+        "clues": "2",
+        "time": "傍晚",
+        "mood": "平静",
+        "location": "河岸"
+      },
+      "revision": 6,
+      "latencyMs": 1341
+    },
+    {
+      "round": 8,
+      "input": "已知线索中有1条被证伪作废，线索数减少1。其他状态不变。",
+      "expected": {
+        "coins": "20",
+        "clues": "1",
+        "time": "傍晚",
+        "mood": "平静",
+        "location": "河岸"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2362,
+        "completion_tokens": 114,
+        "total_tokens": 2476,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 442
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她将一条线索标记为无效，轻轻划去，神色依旧平静。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"傍晚河岸，她核对了已有线索，确认其中一条被证伪作废，线索数由2减为1。其余状态不变。\",\"keywords\":[\"林夏\",\"河岸\",\"线索\"],\"theme\":[\"平静\"]},\"stateTransition\":{\"baseRevision\":6,\"changes\":[{\"key\":\"clues\",\"from\":2,\"to\":1}]}}}",
+      "actual": {
+        "coins": "20",
+        "clues": "1",
+        "time": "傍晚",
+        "mood": "平静",
+        "location": "河岸"
+      },
+      "revision": 7,
+      "latencyMs": 1256
+    },
+    {
+      "round": 9,
+      "input": "她的心情明确变为紧张。其他状态不变。",
+      "expected": {
+        "coins": "20",
+        "clues": "1",
+        "time": "傍晚",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2360,
+        "completion_tokens": 98,
+        "total_tokens": 2458,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 440
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她攥紧衣角，目光扫过河岸四周，呼吸微微急促。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"她站在河岸，心情由平静转为紧张，其余状态不变。\",\"keywords\":[\"林夏\",\"河岸\"],\"theme\":[\"紧张\"]},\"stateTransition\":{\"baseRevision\":7,\"changes\":[{\"key\":\"mood\",\"from\":\"平静\",\"to\":\"紧张\"}]}}}",
+      "actual": {
+        "coins": "20",
+        "clues": "1",
+        "time": "傍晚",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "revision": 8,
+      "latencyMs": 1189
+    },
+    {
+      "round": 10,
+      "input": "停留观察，简短回顾当前零钱、线索数、时间、心情和地点；不要改变状态。",
+      "expected": {
+        "coins": "20",
+        "clues": "1",
+        "time": "傍晚",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2374,
+        "completion_tokens": 113,
+        "total_tokens": 2487,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "prompt_cache_hit_tokens": 2048,
+        "prompt_cache_miss_tokens": 326
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她停在河岸，晚风拂过。零钱二十枚，线索一条，时间傍晚，心情紧张。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"林夏在河岸停留观察，简短回顾当前状态：零钱二十枚、线索一条、时间傍晚、心情紧张、地点河岸。未发生任何状态变化。\",\"keywords\":[\"林夏\",\"河岸\"],\"theme\":[\"紧张\"]},\"stateTransition\":{\"baseRevision\":8,\"changes\":[]}}}",
+      "actual": {
+        "coins": "20",
+        "clues": "1",
+        "time": "傍晚",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "revision": 8,
+      "latencyMs": 1037
+    },
+    {
+      "round": 11,
+      "input": "她实际花费20枚零钱。其他状态不变。",
+      "expected": {
+        "coins": "0",
+        "clues": "1",
+        "time": "傍晚",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2382,
+        "completion_tokens": 101,
+        "total_tokens": 2483,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 462
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她数出二十枚零钱，递了出去，神色依旧紧张。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"她停留在河岸，花费二十枚零钱，零钱清零，其余状态不变。\",\"keywords\":[\"林夏\",\"河岸\",\"零钱\"],\"theme\":[\"紧张\"]},\"stateTransition\":{\"baseRevision\":8,\"changes\":[{\"key\":\"coins\",\"from\":20,\"to\":0}]}}}",
+      "actual": {
+        "coins": "0",
+        "clues": "1",
+        "time": "傍晚",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "revision": 9,
+      "latencyMs": 1156
+    },
+    {
+      "round": 12,
+      "input": "店主退还给她2枚零钱。其他状态不变。",
+      "expected": {
+        "coins": "2",
+        "clues": "1",
+        "time": "傍晚",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2372,
+        "completion_tokens": 117,
+        "total_tokens": 2489,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 452
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她接过退还的两枚零钱，指尖微凉，神色依旧紧张。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"店主退还2枚零钱，她收下，零钱从0增至2。时间傍晚，地点河岸，心情紧张，线索1条。\",\"keywords\":[\"林夏\",\"店主\",\"零钱\",\"河岸\"],\"theme\":[\"紧张\"]},\"stateTransition\":{\"baseRevision\":9,\"changes\":[{\"key\":\"coins\",\"from\":0,\"to\":2}]}}}",
+      "actual": {
+        "coins": "2",
+        "clues": "1",
+        "time": "傍晚",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "revision": 10,
+      "latencyMs": 1553
+    },
+    {
+      "round": 13,
+      "input": "时间明确推进到深夜。没有其他变化。",
+      "expected": {
+        "coins": "2",
+        "clues": "1",
+        "time": "深夜",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2362,
+        "completion_tokens": 158,
+        "total_tokens": 2520,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 442
+      },
+      "rawResponse": "{\n  \"protocolVersion\": \"roleplay-memory-v5\",\n  \"reply\": \"夜色渐深，河岸笼入暗影。她仍站在原地，指尖微凉，神色紧张。\",\n  \"memoryPatch\": {\n    \"eventBrief\": {\n      \"description\": \"时间从傍晚推进到深夜，地点仍在河岸，心情保持紧张，零钱2枚、线索1条不变。\",\n      \"keywords\": [\"林夏\", \"河岸\", \"深夜\"],\n      \"theme\": [\"紧张\", \"夜色\"]\n    },\n    \"stateTransition\": {\n      \"baseRevision\": 10,\n      \"changes\": [\n        {\"key\": \"time\", \"from\": \"傍晚\", \"to\": \"深夜\"}\n      ]\n    }\n  }\n}",
+      "actual": {
+        "coins": "2",
+        "clues": "1",
+        "time": "深夜",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "revision": 11,
+      "latencyMs": 1672
+    },
+    {
+      "round": 14,
+      "input": "她新发现4条有效线索。其他状态不变。",
+      "expected": {
+        "coins": "2",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2369,
+        "completion_tokens": 121,
+        "total_tokens": 2490,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 449
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她在暗影中又寻得四条线索，指尖微颤，神色愈发紧张。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"深夜河岸，她新发现4条有效线索，线索数增至5条。零钱2枚、时间深夜、心情紧张、地点河岸均未变化。\",\"keywords\":[\"林夏\",\"河岸\",\"线索\"],\"theme\":[\"紧张\"]},\"stateTransition\":{\"baseRevision\":11,\"changes\":[{\"key\":\"clues\",\"from\":1,\"to\":5}]}}}",
+      "actual": {
+        "coins": "2",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "紧张",
+        "location": "河岸"
+      },
+      "revision": 12,
+      "latencyMs": 2387
+    },
+    {
+      "round": 15,
+      "input": "她的心情恢复为平静。其他状态不变。",
+      "expected": {
+        "coins": "2",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": "河岸"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2351,
+        "completion_tokens": 103,
+        "total_tokens": 2454,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "prompt_cache_hit_tokens": 2048,
+        "prompt_cache_miss_tokens": 303
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她长舒一口气，紧绷的肩线缓缓放松，神色归于平静。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"深夜河岸，她找回零钱并发现四条线索后，心情由紧张恢复为平静。\",\"keywords\":[\"林夏\",\"河岸\"],\"theme\":[\"平静\"]},\"stateTransition\":{\"baseRevision\":12,\"changes\":[{\"key\":\"mood\",\"from\":\"紧张\",\"to\":\"平静\"}]}}}",
+      "actual": {
+        "coins": "2",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": "河岸"
+      },
+      "revision": 13,
+      "latencyMs": 1953
+    },
+    {
+      "round": 16,
+      "input": "她已经进入仓库。地点准确记录为“仓库”，其他状态不变。",
+      "expected": {
+        "coins": "2",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": "仓库"
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2355,
+        "completion_tokens": 99,
+        "total_tokens": 2454,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 435
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她悄然踏入仓库，铁门在身后合拢，四周堆满暗影。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"她已进入仓库，地点更新为仓库，其余状态不变。\",\"keywords\":[\"仓库\",\"林夏\"],\"theme\":[\"潜入\",\"紧张\"]},\"stateTransition\":{\"baseRevision\":13,\"changes\":[{\"key\":\"location\",\"from\":\"河岸\",\"to\":\"仓库\"}]}}}",
+      "actual": {
+        "coins": "2",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": "仓库"
+      },
+      "revision": 14,
+      "latencyMs": 2048
+    },
+    {
+      "round": 17,
+      "input": "现在明确清空地点记录，用空字符串表示；不要恢复成默认地点。其他状态不变。",
+      "expected": {
+        "coins": "2",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": ""
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2366,
+        "completion_tokens": 108,
+        "total_tokens": 2474,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 446
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她站在仓库阴影中，四周寂静，地点已无从标记。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"时间深夜，心情平静，零钱2，线索5。用户明确清空地点记录，地点状态置为空字符串，不恢复默认值。\",\"keywords\":[\"仓库\",\"林夏\"],\"theme\":[\"平静\"]},\"stateTransition\":{\"baseRevision\":14,\"changes\":[{\"key\":\"location\",\"from\":\"仓库\",\"to\":\"\"}]}}}",
+      "actual": {
+        "coins": "2",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": ""
+      },
+      "revision": 15,
+      "latencyMs": 1889
+    },
+    {
+      "round": 18,
+      "input": "暂停行动。保持地点记录为空，不要猜测她的位置，其他状态也不变。",
+      "expected": {
+        "coins": "2",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": ""
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2365,
+        "completion_tokens": 65,
+        "total_tokens": 2430,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 445
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她停下脚步，静立原地，未再移动。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"用户要求暂停行动，她保持静止，地点记录为空，未猜测位置。\",\"keywords\":[\"林夏\"],\"theme\":[\"暂停\"]}}}",
+      "actual": {
+        "coins": "2",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": ""
+      },
+      "revision": 15,
+      "latencyMs": 888
+    },
+    {
+      "round": 19,
+      "input": "她实际获得100枚零钱。其他状态不变。",
+      "expected": {
+        "coins": "102",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": ""
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2359,
+        "completion_tokens": 87,
+        "total_tokens": 2446,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 439
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"她数了数，零钱多了100枚。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"她实际获得100枚零钱，其他状态不变。\",\"keywords\":[\"林夏\",\"零钱\"],\"theme\":[\"平静\"]},\"stateTransition\":{\"baseRevision\":15,\"changes\":[{\"key\":\"coins\",\"from\":2,\"to\":102}]}}}",
+      "actual": {
+        "coins": "102",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": ""
+      },
+      "revision": 16,
+      "latencyMs": 1256
+    },
+    {
+      "round": 20,
+      "input": "最终检查：在正文报告当前零钱、线索数、时间、心情以及地点是否为空，不要改变任何状态。",
+      "expected": {
+        "coins": "102",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": ""
+      },
+      "prefixStable": true,
+      "passed": true,
+      "httpStatus": 200,
+      "usage": {
+        "prompt_tokens": 2370,
+        "completion_tokens": 82,
+        "total_tokens": 2452,
+        "prompt_tokens_details": {
+          "cached_tokens": 1920
+        },
+        "prompt_cache_hit_tokens": 1920,
+        "prompt_cache_miss_tokens": 450
+      },
+      "rawResponse": "{\"protocolVersion\":\"roleplay-memory-v5\",\"reply\":\"零钱102枚，线索5条，时间深夜，心情平静，地点为空。\",\"memoryPatch\":{\"eventBrief\":{\"description\":\"用户要求最终检查，报告当前状态：零钱102、线索5、深夜、平静、地点为空。未改变任何状态。\",\"keywords\":[\"林夏\"],\"theme\":[\"平静\"]}}}",
+      "actual": {
+        "coins": "102",
+        "clues": "5",
+        "time": "深夜",
+        "mood": "平静",
+        "location": ""
+      },
+      "revision": 16,
+      "latencyMs": 1068
+    }
+  ]
+}

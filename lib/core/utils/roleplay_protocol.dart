@@ -11,7 +11,7 @@ class RoleplayProtocol {
     "eventBrief": {"description": "承接点、本轮推进和结束状态，300字以内", "keywords": ["实体"], "theme": ["主题"]},
     "summary": {"description": "仅在要求总结时输出", "keywords": ["实体"]},
     "stateTransition": {"baseRevision": 0, "changes": [
-      {"key": "用户定义项的ID", "from": "精确旧值", "to": "文本新值；空字符串表示清空"}
+      {"key": "用户定义项的ID", "from": "精确旧值；int项填JSON整数", "to": "按类型填写：int填JSON整数，string/enum填文本；空字符串表示清空"}
     ]},
     "relatedEventIds": [0],
     "knowledgeChanges": [

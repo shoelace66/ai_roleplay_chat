@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../data/models/continuity_state.dart';
 
 /// Import-only compatibility. Runtime state transitions and backups stay strict.
 class ContactImportIssue {
@@ -568,11 +569,31 @@ class ContactJsonNormalizer {
           item[key] = _text(item[key], '$itemPath.$key');
         }
         item['type'] ??= 'string';
-        if (item['type'] != 'string') {
+        if (item['type'] is String) {
+          item['type'] = (item['type'] as String).trim().toLowerCase();
+        }
+        if (item['type'] == 'integer') item['type'] = 'int';
+        if (!const ['string', 'int', 'enum'].contains(item['type'])) {
           _error('$itemPath.type',
-              '当前仅支持 "string"，实际是 ${jsonEncode(item['type'])}；默认值和当前值请使用文本。');
+              '支持 "string"、"int"、"enum"，实际是 ${jsonEncode(item['type'])}。');
         }
         final options = item['enum'];
+        if (item['type'] == 'enum' &&
+            (options == null || options is List && options.isEmpty)) {
+          _error('$itemPath.enum', 'enum 类型必须提供非空选项数组。');
+        }
+        if (item['type'] == 'int') {
+          if (options is List && options.isNotEmpty) {
+            _error('$itemPath.enum', 'int 类型不能同时设置 enum 选项。');
+          }
+          try {
+            item['defaultValue'] =
+                StateDefinition(id: item['id'] as String, name: '', type: 'int')
+                    .readValue(item['defaultValue']);
+          } on FormatException catch (e) {
+            _error('$itemPath.defaultValue', e.message);
+          }
+        }
         if (options != null && options is! List) {
           _error('$itemPath.enum',
               '需要文本数组，例如 ["清晨", "下午", "深夜"]，实际是 ${jsonEncode(options)}。');
@@ -628,6 +649,14 @@ class ContactJsonNormalizer {
       }
       for (final item in items) {
         final id = item['id'] as String;
+        if (item['type'] == 'int' && values.containsKey(id)) {
+          try {
+            values[id] = StateDefinition(id: id, name: '', type: 'int')
+                .readValue(values[id]);
+          } on FormatException catch (e) {
+            _error('$path.values.$id', e.message);
+          }
+        }
         final options = item['enum'];
         if (options is List &&
             options.isNotEmpty &&
