@@ -4,7 +4,7 @@
 
 ## 同版本安装包更新
 
-安装包已基于源码提交 [29b8b24](https://github.com/shoelace66/ai_roleplay_chat/commit/29b8b2494e33049b6fb7bd89562abe57d463def8) 重新构建，版本号仍为 **2.5.2+12**。本次增加 continuity 的 `label / type / enum / defaultValue` 支持、状态维护提示词规则及包含六个状态的完整 JSON 示例；保留旧状态定义和剧情回滚日志兼容。Release 标签保留原始发布位置，本次 APK 的源码以以上提交为准。
+安装包已基于源码提交 [3ebff4d](https://github.com/shoelace66/ai_roleplay_chat/commit/3ebff4d713656c7186754136d991fcd28bfe5b10) 重新构建，版本号仍为 **2.5.2+12**。continuity 支持 `string / int / enum`，编辑器可选择类型，提示词及本地状态更新按类型维护；示例包含整数胶片数量等七个状态。保留旧状态定义和剧情回滚日志兼容。Release 标签保留原始发布位置，本次 APK 的源码以以上提交为准。
 
 ## 变化
 
@@ -15,10 +15,11 @@
 
 ## 验证
 
-- Flutter 静态分析通过，395 项自动测试全部通过。
+- Flutter 静态分析通过，默认测试精简为 100 个核心用例，全部通过；七种屏幕尺寸与三档字体组合仍在布局矩阵中执行。
+- 单独进行 DeepSeek / deepseek-chat 20 轮真实调用，19/20 通过。第 5 轮模型返回全空格，解析器拒绝提交状态；未重试覆盖失败结果。总用量 48,981 tokens。详见[真实测试报告](https://github.com/shoelace66/ai_roleplay_chat/blob/main/reports/typed_state_live_2026-09-09.md)。
 - 创建窗口覆盖 320×568、360×640、390×844、412×915、540×720、640×360、844×390 逻辑像素，分别验证 1.0、1.3、1.6 倍字体，以及键盘弹出后输入、提交。
 - 聊天、侧栏与资料页覆盖小屏、长屏和横屏、大字体、键盘及安全区域的组件测试；使用真实中文字体渲染预览。
 - Android 版本 2.5.2，versionCode 12。手机适配验证来自 Flutter 组件测试，本次未进行 Android 实机测试。
-- APK v2 签名验证通过，交付文件与构建输出 SHA-256 一致：`86c133cb4896338867a2b19e917c3551711a98455215c2e77871d82d0181bd42`。
+- APK v2 签名验证通过，交付文件与构建输出 SHA-256 一致：`e4c44d503695df23c960ec1452703eb0a6b4a76d1c31959e374f53d813777573`。
 
 [界面预览与验证说明](UI_ADAPTIVE_v2.5.2.md)。附件提供 APK 与 SHA-256 校验文件。
